@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
+	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
 	"github.com/Harshitk-cp/rtmp_server/pkg/handlers"
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
@@ -49,11 +50,14 @@ func main() {
 		Addr:    ":" + portString,
 	}
 
+	conf, err := loadConfig()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
 	go func() {
-		// port := 1935 // Example RTMP port
 		rtmpServer := rtmp.NewRTMPServer()
-		err := rtmpServer.Start(&config.Config{}, func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
-			// Handle the onPublish callback here if needed
+		err := rtmpServer.Start(conf, func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
 			return nil, nil, nil
 		})
 		if err != nil {
@@ -62,9 +66,24 @@ func main() {
 	}()
 
 	log.Printf("Server starting on port %v", portString)
-	err := srv.ListenAndServe()
-	if err != nil {
-		log.Fatal(err)
+
+	servErr := srv.ListenAndServe()
+	if servErr != nil {
+		log.Fatal(servErr)
 	}
 
+}
+
+func loadConfig() (*config.Config, error) {
+	configFile := os.Getenv("CONFIG_FILE_PATH")
+	if configFile == "" {
+		return nil, errors.ErrNoConfig
+	}
+
+	conf, err := config.LoadFromFile(configFile)
+	if err != nil {
+		return nil, err
+	}
+
+	return conf, nil
 }

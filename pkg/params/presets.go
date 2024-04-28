@@ -17,7 +17,7 @@ package params
 import (
 	"math"
 
-	"github.com/livekit/ingress/pkg/errors"
+	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
 	"github.com/livekit/protocol/livekit"
 )
 

@@ -1,17 +1,3 @@
-// Copyright 2023 LiveKit, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package params
 
 import (
@@ -23,15 +9,13 @@ import (
 	"time"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
+	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
 	"github.com/Harshitk-cp/rtmp_server/pkg/types"
-	"github.com/livekit/ingress/pkg/errors"
-	"github.com/livekit/ingress/pkg/ipc"
 	"github.com/livekit/protocol/ingress"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/rpc"
 	"github.com/livekit/protocol/utils"
-	"github.com/livekit/psrpc"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -83,7 +67,6 @@ func InitLogger(conf *config.Config, info *livekit.IngressInfo, loggingFields ma
 func GetParams(ctx context.Context, psrpcClient rpc.IOInfoClient, conf *config.Config, info *livekit.IngressInfo, wsUrl, token, relayToken string, loggingFields map[string]string, ep any) (*Params, error) {
 	var err error
 
-	// The state should have been created by the service, before launching the hander, but be defensive here.
 	if info.State == nil || info.State.ResourceId == "" {
 		return nil, errors.ErrMissingResourceId
 	}
@@ -367,46 +350,46 @@ func (p *Params) SetInputVideoState(ctx context.Context, videoState *livekit.Inp
 	}
 }
 
-func (p *Params) SetInputAudioStats(st *ipc.TrackStats) {
-	p.stateLock.Lock()
+// func (p *Params) SetInputAudioStats(st *ipc.TrackStats) {
+// 	p.stateLock.Lock()
 
-	if p.State.Audio == nil {
-		p.State.Audio = &livekit.InputAudioState{}
-	}
+// 	if p.State.Audio == nil {
+// 		p.State.Audio = &livekit.InputAudioState{}
+// 	}
 
-	p.State.Audio.AverageBitrate = st.AverageBitrate
+// 	p.State.Audio.AverageBitrate = st.AverageBitrate
 
-	p.stateLock.Unlock()
-}
+// 	p.stateLock.Unlock()
+// }
 
-func (p *Params) SetInputVideoStats(st *ipc.TrackStats) {
-	p.stateLock.Lock()
+// func (p *Params) SetInputVideoStats(st *ipc.TrackStats) {
+// 	p.stateLock.Lock()
 
-	if p.State.Video == nil {
-		p.State.Video = &livekit.InputVideoState{}
-	}
+// 	if p.State.Video == nil {
+// 		p.State.Video = &livekit.InputVideoState{}
+// 	}
 
-	p.State.Video.AverageBitrate = st.AverageBitrate
+// 	p.State.Video.AverageBitrate = st.AverageBitrate
 
-	p.stateLock.Unlock()
-}
+// 	p.stateLock.Unlock()
+// }
 
 func (p *Params) SendStateUpdate(ctx context.Context) {
 	info := p.CopyInfo()
 
 	info.State.UpdatedAt = time.Now().UnixNano()
 
-	_, err := p.psrpcClient.UpdateIngressState(ctx, &rpc.UpdateIngressStateRequest{
-		IngressId: info.IngressId,
-		State:     info.State,
-	})
-	if err != nil {
-		var psrpcErr psrpc.Error
-		if !errors.As(err, &psrpcErr) || psrpcErr.Code() != psrpc.NotFound {
-			// Ingress was deleted
-			p.logger.Errorw("failed to send update", err)
-		}
-	}
+	// _, err := p.psrpcClient.UpdateIngressState(ctx, &rpc.UpdateIngressStateRequest{
+	// 	IngressId: info.IngressId,
+	// 	State:     info.State,
+	// })
+	// if err != nil {
+	// var psrpcErr psrpc.Error
+	// if !errors.As(err, &psrpcErr) || psrpcErr.Code() != psrpc.NotFound {
+	// 	// Ingress was deleted
+	// 	p.logger.Errorw("failed to send update", err)
+	// }
+	// }
 }
 
 func (p *Params) GetLogger() logger.Logger {

@@ -1,9 +1,21 @@
 package config
 
 import (
+	"errors"
+	"os"
+
 	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/redis"
+	"github.com/livekit/protocol/utils"
 	lksdk "github.com/livekit/server-sdk-go/v2"
+	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	DefaultRTMPPort      int = 1935
+	DefaultWHIPPort      int = 8080
+	DefaultHTTPRelayPort int = 9090
 )
 
 type Config struct {
@@ -37,8 +49,48 @@ type LoggingConfig struct {
 	JSON bool
 }
 
-func (c *Config) GetLoggerFields() map[string]interface{} {
+func (conf *ServiceConfig) InitDefaults() error {
+	if conf.RTMPPort == 0 {
+		conf.RTMPPort = DefaultRTMPPort
+	}
+	if conf.HTTPRelayPort == 0 {
+		conf.HTTPRelayPort = DefaultHTTPRelayPort
+	}
+	if conf.WHIPPort == 0 {
+		conf.WHIPPort = DefaultWHIPPort
+	}
 	return nil
+}
+
+func (conf *Config) Init() error {
+	conf.NodeID = utils.NewGuid("NE_")
+	err := conf.InitDefaults()
+	if err != nil {
+		return err
+	}
+
+	if conf.InternalConfig == nil {
+		// Handle the case where InternalConfig is nil
+		return errors.New("InternalConfig is nil")
+	}
+
+	if err := conf.InitLogger(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) GetLoggerFields() logrus.Fields {
+	fields := logrus.Fields{
+		"logger": c.ServiceName,
+	}
+	v := c.getLoggerValues()
+	for i := 0; i < len(v); i += 2 {
+		fields[v[i].(string)] = v[i+1]
+	}
+
+	return fields
 }
 
 func (c *Config) InitLogger(values ...interface{}) error {
@@ -57,4 +109,27 @@ func (c *Config) InitLogger(values ...interface{}) error {
 
 func (c *Config) getLoggerValues() []interface{} {
 	return []interface{}{"nodeID", c.NodeID}
+}
+
+func LoadFromFile(filePath string) (*Config, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var conf Config
+	err = yaml.Unmarshal(data, &conf)
+	if err != nil {
+		return nil, err
+	}
+
+	// Initialize the InternalConfig field
+	conf.InternalConfig = &InternalConfig{}
+
+	// Initialize the configuration
+	if err := conf.Init(); err != nil {
+		return nil, err
+	}
+
+	return &conf, nil
 }

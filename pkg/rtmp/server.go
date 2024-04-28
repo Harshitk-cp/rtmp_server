@@ -9,20 +9,19 @@ import (
 	"sync"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
+	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
 	"github.com/Harshitk-cp/rtmp_server/pkg/stats"
+	"github.com/Harshitk-cp/rtmp_server/pkg/types"
+	"github.com/Harshitk-cp/rtmp_server/pkg/utils"
 	"github.com/frostbyte73/core"
-	"github.com/livekit/go-rtmp"
-	rtmpmsg "github.com/livekit/go-rtmp/message"
-	"github.com/livekit/ingress/pkg/errors"
-	"github.com/livekit/ingress/pkg/types"
-	"github.com/livekit/ingress/pkg/utils"
 	"github.com/livekit/protocol/logger"
 	protoutils "github.com/livekit/protocol/utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/yutopp/go-flv"
 	flvtag "github.com/yutopp/go-flv/tag"
-	// "github.com/yutopp/go-rtmp"
+	"github.com/yutopp/go-rtmp"
+	rtmpmsg "github.com/yutopp/go-rtmp/message"
 )
 
 type RTMPServer struct {
@@ -363,9 +362,7 @@ func (h *RTMPHandler) initFlvEncoder() error {
 	}
 	h.flvEnc = enc
 
-	// Serialize video and video decoder initialization
 	if h.videoInit != nil {
-		// Copy init tag to be able to reuse it
 
 		if err := h.flvEnc.Encode(&flvtag.FlvTag{
 			TagType:   flvtag.TagTypeVideo,
@@ -376,7 +373,6 @@ func (h *RTMPHandler) initFlvEncoder() error {
 		}
 	}
 	if h.audioInit != nil {
-		// Copy init tag to be able to reuse it
 
 		if err := h.flvEnc.Encode(&flvtag.FlvTag{
 			TagType:   flvtag.TagTypeAudio,
