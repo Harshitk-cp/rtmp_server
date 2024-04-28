@@ -5,7 +5,11 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/handlers"
+	"github.com/Harshitk-cp/rtmp_server/pkg/params"
+	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
+	"github.com/Harshitk-cp/rtmp_server/pkg/stats"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
@@ -36,6 +40,7 @@ func main() {
 
 	v1Router.Get("/checkHealth", handlers.HandleReadiness)
 	v1Router.Get("/err", handlers.HandleErr)
+	v1Router.Get("/es", handlers.HandleWebSocket)
 
 	router.Mount("/v1", v1Router)
 
@@ -43,6 +48,18 @@ func main() {
 		Handler: router,
 		Addr:    ":" + portString,
 	}
+
+	go func() {
+		// port := 1935 // Example RTMP port
+		rtmpServer := rtmp.NewRTMPServer()
+		err := rtmpServer.Start(&config.Config{}, func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
+			// Handle the onPublish callback here if needed
+			return nil, nil, nil
+		})
+		if err != nil {
+			log.Fatalf("Failed to start RTMP server: %v", err)
+		}
+	}()
 
 	log.Printf("Server starting on port %v", portString)
 	err := srv.ListenAndServe()
