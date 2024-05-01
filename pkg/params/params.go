@@ -10,12 +10,14 @@ import (
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
+	"github.com/Harshitk-cp/rtmp_server/pkg/ipc"
 	"github.com/Harshitk-cp/rtmp_server/pkg/types"
 	"github.com/livekit/protocol/ingress"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/rpc"
 	"github.com/livekit/protocol/utils"
+	"github.com/livekit/psrpc"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -350,46 +352,46 @@ func (p *Params) SetInputVideoState(ctx context.Context, videoState *livekit.Inp
 	}
 }
 
-// func (p *Params) SetInputAudioStats(st *ipc.TrackStats) {
-// 	p.stateLock.Lock()
+func (p *Params) SetInputAudioStats(st *ipc.TrackStats) {
+	p.stateLock.Lock()
 
-// 	if p.State.Audio == nil {
-// 		p.State.Audio = &livekit.InputAudioState{}
-// 	}
+	if p.State.Audio == nil {
+		p.State.Audio = &livekit.InputAudioState{}
+	}
 
-// 	p.State.Audio.AverageBitrate = st.AverageBitrate
+	p.State.Audio.AverageBitrate = st.AverageBitrate
 
-// 	p.stateLock.Unlock()
-// }
+	p.stateLock.Unlock()
+}
 
-// func (p *Params) SetInputVideoStats(st *ipc.TrackStats) {
-// 	p.stateLock.Lock()
+func (p *Params) SetInputVideoStats(st *ipc.TrackStats) {
+	p.stateLock.Lock()
 
-// 	if p.State.Video == nil {
-// 		p.State.Video = &livekit.InputVideoState{}
-// 	}
+	if p.State.Video == nil {
+		p.State.Video = &livekit.InputVideoState{}
+	}
 
-// 	p.State.Video.AverageBitrate = st.AverageBitrate
+	p.State.Video.AverageBitrate = st.AverageBitrate
 
-// 	p.stateLock.Unlock()
-// }
+	p.stateLock.Unlock()
+}
 
 func (p *Params) SendStateUpdate(ctx context.Context) {
 	info := p.CopyInfo()
 
 	info.State.UpdatedAt = time.Now().UnixNano()
 
-	// _, err := p.psrpcClient.UpdateIngressState(ctx, &rpc.UpdateIngressStateRequest{
-	// 	IngressId: info.IngressId,
-	// 	State:     info.State,
-	// })
-	// if err != nil {
-	// var psrpcErr psrpc.Error
-	// if !errors.As(err, &psrpcErr) || psrpcErr.Code() != psrpc.NotFound {
-	// 	// Ingress was deleted
-	// 	p.logger.Errorw("failed to send update", err)
-	// }
-	// }
+	_, err := p.psrpcClient.UpdateIngressState(ctx, &rpc.UpdateIngressStateRequest{
+		IngressId: info.IngressId,
+		State:     info.State,
+	})
+	if err != nil {
+		var psrpcErr psrpc.Error
+		if !errors.As(err, &psrpcErr) || psrpcErr.Code() != psrpc.NotFound {
+			// Ingress was deleted
+			p.logger.Errorw("failed to send update", err)
+		}
+	}
 }
 
 func (p *Params) GetLogger() logger.Logger {

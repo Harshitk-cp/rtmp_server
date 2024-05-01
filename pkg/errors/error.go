@@ -27,3 +27,11 @@ var (
 	ErrRoomDisconnected             = errors.New("room disconnected")
 	ErrRoomDisconnectedUnexpectedly = errors.New("room disconnected unexpectedly")
 )
+
+func New(err string) error {
+	return errors.New(err)
+}
+
+func As(err error, target any) bool {
+	return errors.As(err, target)
+}

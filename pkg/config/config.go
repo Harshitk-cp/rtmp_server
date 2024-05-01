@@ -37,6 +37,16 @@ type ServiceConfig struct {
 	HTTPRelayPort    int           `yaml:"http_relay_port"`
 	Logging          logger.Config `yaml:"logging"`
 	Development      bool          `yaml:"development"`
+
+	CPUCost CPUCostConfig `yaml:"cpu_cost"`
+}
+
+type CPUCostConfig struct {
+	RTMPCpuCost                  float64 `yaml:"rtmp_cpu_cost"`
+	WHIPCpuCost                  float64 `yaml:"whip_cpu_cost"`
+	WHIPBypassTranscodingCpuCost float64 `yaml:"whip_bypass_transcoding_cpu_cost"`
+	URLCpuCost                   float64 `yaml:"url_cpu_cost"`
+	MinIdleRatio                 float64 `yaml:"min_idle_ratio"` // Target idle cpu ratio when deciding availability for new requests
 }
 
 type InternalConfig struct {
