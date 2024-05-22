@@ -1,24 +1,27 @@
 package main
 
 import (
-	"log"
 	"net/http"
 	"os"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
 	"github.com/Harshitk-cp/rtmp_server/pkg/handlers"
+	"github.com/Harshitk-cp/rtmp_server/pkg/ingress"
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
+	"github.com/Harshitk-cp/rtmp_server/pkg/room"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
 	"github.com/Harshitk-cp/rtmp_server/pkg/stats"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
+	"github.com/go-gst/go-gst/gst"
 	"github.com/joho/godotenv"
+	"github.com/sirupsen/logrus"
 )
 
 func init() {
 	if err := godotenv.Load(); err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
+		logrus.Fatalf("Error loading .env file: %v", err)
 	}
 }
 
@@ -41,7 +44,10 @@ func main() {
 
 	v1Router.Get("/checkHealth", handlers.HandleReadiness)
 	v1Router.Get("/err", handlers.HandleErr)
-	v1Router.Get("/es", handlers.HandleWebSocket)
+	v1Router.Get("/ws/{roomID}", func(w http.ResponseWriter, r *http.Request) {
+		roomID := chi.URLParam(r, "roomID")
+		logrus.Print("roomId: ", roomID)
+	})
 
 	router.Mount("/v1", v1Router)
 
@@ -52,24 +58,43 @@ func main() {
 
 	conf, err := loadConfig()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		logrus.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	gst.Init(nil)
 
 	go func() {
 		rtmpServer := rtmp.NewRTMPServer()
 		err := rtmpServer.Start(conf, func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
+
+			rm := room.NewRoomManager()
+			r, _ := rm.GetRoom(streamKey)
+			if r == nil {
+				r = rm.CreateRoom(streamKey)
+			}
+			logrus.Printf("Stream key: %v", streamKey)
+
+			participant, _ := r.CreateParticipant(resourceId)
+
+			ingressManager := ingress.NewIngressManager(conf, rtmpServer)
+			ingress, err := ingressManager.CreateIngress(streamKey, r, participant)
+			if err != nil {
+				logrus.Print(err.Error())
+			}
+
+			go ingress.Start()
 			return nil, nil, nil
 		})
 		if err != nil {
-			log.Fatalf("Failed to start RTMP server: %v", err)
+			logrus.Fatalf("Failed to start RTMP server: %v", err)
 		}
 	}()
 
-	log.Printf("Server starting on port %v", portString)
+	logrus.Printf("Server starting on port %v", portString)
 
 	servErr := srv.ListenAndServe()
 	if servErr != nil {
-		log.Fatal(servErr)
+		logrus.Fatal(servErr)
 	}
 
 }

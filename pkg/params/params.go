@@ -26,7 +26,6 @@ type Params struct {
 	*livekit.IngressInfo
 	*config.Config
 
-	// extra state
 	err error
 
 	logger logger.Logger
@@ -34,19 +33,15 @@ type Params struct {
 	AudioEncodingOptions *livekit.IngressAudioEncodingOptions
 	VideoEncodingOptions *livekit.IngressVideoEncodingOptions
 
-	// connection info
 	WsUrl string
 	Token string
 
-	// extra logging fields
 	LoggingFields map[string]string
 
-	// relay info
 	RelayUrl   string
 	RelayToken string
 	TmpDir     string
 
-	// Input type specific private parameters
 	ExtraParams any
 }
 
@@ -150,8 +145,6 @@ func UpdateTranscodingEnabled(info *livekit.IngressInfo) {
 		return
 	}
 
-	// Backward compatibility. This is an ingress created before the EnableTranscoding field was added.
-	// Default to enabling transcoding for WHIP
 	switch info.InputType {
 	case livekit.IngressInput_WHIP_INPUT:
 		b := !info.BypassTranscoding
@@ -196,17 +189,13 @@ func getAudioEncodingOptions(options *livekit.IngressAudioOptions) (*livekit.Ing
 func populateAudioEncodingOptionsDefaults(options *livekit.IngressAudioEncodingOptions) (*livekit.IngressAudioEncodingOptions, error) {
 	o := proto.Clone(options).(*livekit.IngressAudioEncodingOptions)
 
-	// Use Opus by default
 	if o.AudioCodec == livekit.AudioCodec_DEFAULT_AC {
 		o.AudioCodec = livekit.AudioCodec_OPUS
 	}
-
-	// Stereo by default
 	if o.Channels == 0 {
 		o.Channels = 2
 	}
 
-	// Default bitrate, depends on channel count
 	if o.Bitrate == 0 {
 		switch o.Channels {
 		case 1:
@@ -216,15 +205,12 @@ func populateAudioEncodingOptionsDefaults(options *livekit.IngressAudioEncodingO
 		}
 	}
 
-	// DTX enabled by default
-
 	return o, nil
 }
 
 func getVideoEncodingOptions(options *livekit.IngressVideoOptions) (*livekit.IngressVideoEncodingOptions, error) {
 	switch o := options.EncodingOptions.(type) {
 	case nil:
-		// default preset
 		return getOptionsForVideoPreset(livekit.IngressVideoEncodingPreset_H264_720P_30FPS_3_LAYERS)
 	case *livekit.IngressVideoOptions_Preset:
 		return getOptionsForVideoPreset(o.Preset)
@@ -238,7 +224,6 @@ func getVideoEncodingOptions(options *livekit.IngressVideoOptions) (*livekit.Ing
 func populateVideoEncodingOptionsDefaults(options *livekit.IngressVideoEncodingOptions) (*livekit.IngressVideoEncodingOptions, error) {
 	o := proto.Clone(options).(*livekit.IngressVideoEncodingOptions)
 
-	// Use Opus by default
 	if o.VideoCodec == livekit.VideoCodec_DEFAULT_VC {
 		o.VideoCodec = livekit.VideoCodec_H264_BASELINE
 	}
@@ -278,7 +263,6 @@ func (p *Params) CopyInfo() *livekit.IngressInfo {
 	return info
 }
 
-// Useful in some paths where the extanded params are not known at creation time
 func (p *Params) SetExtraParams(ep any) {
 	p.ExtraParams = ep
 }
@@ -288,7 +272,6 @@ func (p *Params) SetStatus(status livekit.IngressState_Status, err error) {
 	defer p.stateLock.Unlock()
 
 	p.State.Status = status
-	// Always return the first error
 	if p.err == nil {
 		p.err = err
 	}
@@ -314,7 +297,6 @@ func (p *Params) SetInputAudioState(ctx context.Context, audioState *livekit.Inp
 	p.stateLock.Lock()
 	modified := false
 
-	// Do not overwrite the bitrate
 	if audioState != nil && p.State.Audio != nil {
 		audioState.AverageBitrate = p.State.Audio.AverageBitrate
 	}
@@ -334,7 +316,6 @@ func (p *Params) SetInputVideoState(ctx context.Context, videoState *livekit.Inp
 	p.stateLock.Lock()
 	modified := false
 
-	// Do not overwrite the bitrate
 	if videoState != nil && p.State.Video != nil {
 		videoState.AverageBitrate = p.State.Video.AverageBitrate
 	}
@@ -349,47 +330,10 @@ func (p *Params) SetInputVideoState(ctx context.Context, videoState *livekit.Inp
 		p.SendStateUpdate(ctx)
 	}
 }
-
-// func (p *Params) SetInputAudioStats(st *ipc.TrackStats) {
-// 	p.stateLock.Lock()
-
-// 	if p.State.Audio == nil {
-// 		p.State.Audio = &livekit.InputAudioState{}
-// 	}
-
-// 	p.State.Audio.AverageBitrate = st.AverageBitrate
-
-// 	p.stateLock.Unlock()
-// }
-
-// func (p *Params) SetInputVideoStats(st *ipc.TrackStats) {
-// 	p.stateLock.Lock()
-
-// 	if p.State.Video == nil {
-// 		p.State.Video = &livekit.InputVideoState{}
-// 	}
-
-// 	p.State.Video.AverageBitrate = st.AverageBitrate
-
-// 	p.stateLock.Unlock()
-// }
-
 func (p *Params) SendStateUpdate(ctx context.Context) {
 	info := p.CopyInfo()
 
 	info.State.UpdatedAt = time.Now().UnixNano()
-
-	// _, err := p.psrpcClient.UpdateIngressState(ctx, &rpc.UpdateIngressStateRequest{
-	// 	IngressId: info.IngressId,
-	// 	State:     info.State,
-	// })
-	// if err != nil {
-	// var psrpcErr psrpc.Error
-	// if !errors.As(err, &psrpcErr) || psrpcErr.Code() != psrpc.NotFound {
-	// 	// Ingress was deleted
-	// 	p.logger.Errorw("failed to send update", err)
-	// }
-	// }
 }
 
 func (p *Params) GetLogger() logger.Logger {

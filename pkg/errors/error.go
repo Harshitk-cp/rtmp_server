@@ -26,4 +26,7 @@ var (
 	ErrSimulcastTranscode           = errors.New("simulcast is not supported when transcoding")
 	ErrRoomDisconnected             = errors.New("room disconnected")
 	ErrRoomDisconnectedUnexpectedly = errors.New("room disconnected unexpectedly")
+	ErrParticipantExists            = errors.New("participants exist")
+	ErrParticipantNotFound          = errors.New("participant not found")
+	ErrStreamNotFound               = errors.New("stream not found")
 )

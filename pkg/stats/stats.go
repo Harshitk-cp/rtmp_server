@@ -1,7 +1,6 @@
 package stats
 
 type LocalMediaStatsGatherer struct {
-	// Implement necessary methods for media stats gathering if needed
 }
 
 const (
@@ -14,9 +13,7 @@ func (s *LocalMediaStatsGatherer) RegisterTrackStats(kind string) *MediaTrackSta
 }
 
 type MediaTrackStatGatherer struct {
-	// Implement necessary methods for track stats gathering if needed
 }
 
 func (t *MediaTrackStatGatherer) MediaReceived(bytes int64) {
-	// Implement media received logic if needed
 }

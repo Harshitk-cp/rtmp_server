@@ -1,17 +1,3 @@
-// Copyright 2023 LiveKit, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package params
 
 import (
@@ -22,7 +8,6 @@ import (
 )
 
 const (
-	// reference parameters used to compute bitrate
 	refBitrate   = 3_500_000
 	refWidth     = 1920
 	refHeight    = 1080
@@ -156,7 +141,7 @@ func computeVideoLayers(highLayer *livekit.VideoLayer, layerCount int) []*liveki
 	}
 
 	for i := 1; i < layerCount; i++ {
-		w := layerCopy.Width >> i // each layer has dimentions half of the previous one
+		w := layerCopy.Width >> i
 		h := layerCopy.Height >> i
 
 		rate := getBitrateForParams(layerCopy.Bitrate, layerCopy.Width, layerCopy.Height, 1, w, h, 1)
@@ -175,7 +160,6 @@ func computeVideoLayers(highLayer *livekit.VideoLayer, layerCount int) []*liveki
 }
 
 func getBitrateForParams(refBitrate, refWidth, refHeight uint32, refFramerate float64, targetWidth, targetHeight uint32, targetFramerate float64) uint32 {
-	// bitrate = ref_bitrate * (target framerate / ref framerate) ^ 0.75 * (target pixel area / ref pixel area) ^ 0.75
 
 	ratio := math.Pow(float64(targetFramerate)/float64(refFramerate), 0.75)
 	ratio = ratio * math.Pow(float64(targetWidth)*float64(targetHeight)/(float64(refWidth)*float64(refHeight)), 0.75)

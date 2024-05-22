@@ -70,7 +70,6 @@ func (conf *Config) Init() error {
 	}
 
 	if conf.InternalConfig == nil {
-		// Handle the case where InternalConfig is nil
 		return errors.New("InternalConfig is nil")
 	}
 

@@ -16,7 +16,11 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/prometheus/client_golang v1.19.0 // indirect
+require (
+	github.com/go-gst/go-glib v1.0.0 // indirect
+	github.com/mattn/go-pointer v0.0.1 // indirect
+	github.com/prometheus/client_golang v1.19.0 // indirect
+)
 
 require (
 	github.com/benbjohnson/clock v1.3.5 // indirect
@@ -44,7 +48,7 @@ require (
 	github.com/pion/stun v0.6.1 // indirect
 	github.com/pion/transport/v2 v2.2.4 // indirect
 	github.com/pion/turn/v2 v2.1.4 // indirect
-	github.com/pion/webrtc/v3 v3.2.38 // indirect
+	github.com/pion/webrtc/v3 v3.2.38
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
@@ -57,6 +61,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/gammazero/deque v0.2.1 // indirect
+	github.com/go-gst/go-gst v1.0.0
 	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect

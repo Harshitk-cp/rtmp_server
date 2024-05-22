@@ -49,7 +49,6 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 
 	srv := rtmp.NewServer(&rtmp.ServerConfig{
 		OnConnect: func(conn net.Conn) (io.ReadWriteCloser, *rtmp.ConnConfig) {
-			// Should we find a way to use our own logger?
 			l := log.StandardLogger()
 			if conf.Logging.JSON {
 				l.SetFormatter(&log.JSONFormatter{})
@@ -185,7 +184,6 @@ func (h *RTMPHandler) OnCloseCallback(cb func(resourceId string)) {
 }
 
 func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rtmpmsg.NetStreamPublish) error {
-	// Reject a connection when PublishingName is empty
 	if cmd.PublishingName == "" {
 		return errors.ErrMissingStreamKey
 	}
@@ -225,7 +223,7 @@ func (h *RTMPHandler) OnSetDataFrame(timestamp uint32, data *rtmpmsg.NetStreamSe
 	var script flvtag.ScriptData
 	if err := flvtag.DecodeScriptData(r, &script); err != nil {
 		h.log.Errorw("failed to decode script data", err)
-		return nil // ignore
+		return nil
 	}
 
 	if err := h.flvEnc.Encode(&flvtag.FlvTag{
@@ -257,7 +255,6 @@ func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
 		return err
 	}
 
-	// Why copy the payload here?
 	flvBody := new(bytes.Buffer)
 	if _, err := io.Copy(flvBody, audio.Data); err != nil {
 		return err
@@ -398,4 +395,16 @@ func copyAudioTag(in *flvtag.AudioData) *flvtag.AudioData {
 	ret.Data = bytes.NewBuffer(in.Data.(*bytes.Buffer).Bytes())
 
 	return &ret
+}
+
+func (s *RTMPServer) GetStream(resourceId string) (io.Reader, error) {
+	h, ok := s.handlers.Load(resourceId)
+	if !ok || h == nil {
+		return nil, errors.ErrDuplicateTrack
+	}
+	return h.(*RTMPHandler).MediaBuffer(), nil
+}
+
+func (h *RTMPHandler) MediaBuffer() io.Reader {
+	return h.mediaBuffer
 }

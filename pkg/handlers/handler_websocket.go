@@ -49,7 +49,6 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the room name and ingress ID from the query parameters
 	roomName := r.URL.Query().Get("room")
 	ingressID := r.URL.Query().Get("ingressID")
 
@@ -66,10 +65,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		room = CreateRoom(roomName, ingressID)
 	}
 
-	// Add the new client to the room
 	room.Clients[conn] = true
-
-	// Handle incoming messages from the client
 	for {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
@@ -77,16 +73,12 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// Broadcast the message to all clients in the room
 		room.Broadcast(message)
 
-		// Handle different message types if needed
 		if messageType == websocket.CloseMessage {
 			break
 		}
 	}
-
-	// Remove the client from the room when disconnected
 	delete(room.Clients, conn)
 	conn.Close()
 }
