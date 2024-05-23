@@ -1,12 +1,11 @@
 package ingress
 
 import (
-	"log"
-
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/media"
 	"github.com/Harshitk-cp/rtmp_server/pkg/room"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
+	"github.com/sirupsen/logrus"
 )
 
 type Ingress struct {
@@ -45,13 +44,13 @@ func (i *Ingress) Start() error {
 	go func() {
 		err := i.transcoder.Start(i.rtmpServer, i.participant.ID)
 		if err != nil {
-			log.Print(err)
+			logrus.Printf("Failed to start transcoder: %v", err)
 		}
 	}()
 	go func() {
 		err := i.webrtcSignal.Start(i.participant)
 		if err != nil {
-			log.Print(err)
+			logrus.Printf("Failed to start WebRTC signaling: %v", err)
 		}
 	}()
 

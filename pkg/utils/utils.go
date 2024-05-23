@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"io"
 	"sync"
-
-	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
 )
 
 const (
-	maxBufferSize = 10000000
+	maxBufferSize = 10000000000
 )
 
 type PrerollBuffer struct {
@@ -57,16 +55,28 @@ func (pb *PrerollBuffer) Write(p []byte) (int, error) {
 
 	if pb.w == nil {
 		if len(p)+pb.buffer.Len() > maxBufferSize {
-			pb.buffer.Reset()
-			if pb.onBufferReset != nil {
-				if err := pb.onBufferReset(); err != nil {
-					return 0, err
-				}
+			excessBytes := len(p) + pb.buffer.Len() - maxBufferSize
+			if excessBytes >= pb.buffer.Len() {
+				pb.buffer.Reset()
+			} else {
+				pb.buffer.Next(excessBytes)
 			}
-			return 0, errors.ErrPrerollBufferReset
 		}
 		return pb.buffer.Write(p)
 	}
+
+	// if pb.w == nil {
+	// 	if len(p)+pb.buffer.Len() > maxBufferSize {
+	// 		pb.buffer.Reset()
+	// 		if pb.onBufferReset != nil {
+	// 			if err := pb.onBufferReset(); err != nil {
+	// 				return 0, err
+	// 			}
+	// 		}
+	// 		return 0, errors.ErrPrerollBufferReset
+	// 	}
+	// 	return pb.buffer.Write(p)
+	// }
 
 	n, err := pb.w.Write(p)
 	if err == io.ErrClosedPipe {

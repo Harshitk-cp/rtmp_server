@@ -17,6 +17,7 @@ import (
 	"github.com/frostbyte73/core"
 	"github.com/livekit/protocol/logger"
 	protoutils "github.com/livekit/protocol/utils"
+	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	"github.com/yutopp/go-flv"
 	flvtag "github.com/yutopp/go-flv/tag"
@@ -54,6 +55,10 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 				l.SetFormatter(&log.JSONFormatter{})
 			}
 			lf := l.WithFields(conf.GetLoggerFields())
+
+			logrus.WithFields(logrus.Fields{
+				"remoteAddr": conn.RemoteAddr(),
+			}).Error("Client connected")
 
 			h := NewRTMPHandler()
 			h.OnPublishCallback(func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
@@ -189,8 +194,9 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 	}
 
 	_, streamKey := path.Split(cmd.PublishingName)
+	appName := "live"
 	h.resourceId = protoutils.NewGuid(protoutils.RTMPResourcePrefix)
-	h.log = logger.GetLogger().WithValues("streamKey", streamKey, "resourceID", h.resourceId)
+	h.log = logger.GetLogger().WithValues("appName", appName, "streamKey", streamKey, "resourceID", h.resourceId)
 	if h.onPublish != nil {
 		params, st, err := h.onPublish(streamKey, h.resourceId)
 		if err != nil {
@@ -201,6 +207,13 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 		h.trackStats[types.Audio] = st.RegisterTrackStats(stats.InputAudio)
 		h.trackStats[types.Video] = st.RegisterTrackStats(stats.InputVideo)
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"appName":        appName,
+		"streamKey":      streamKey,
+		"resourceID":     h.resourceId,
+		"publishingName": cmd.PublishingName,
+	}).Info("Received publish request")
 
 	h.log.Infow("Received a new published stream")
 
@@ -278,6 +291,12 @@ func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
 		return err
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"resourceID": h.resourceId,
+		"timestamp":  timestamp,
+		"dataLength": flvBody.Len(),
+	}).Error("Received audio data")
+
 	return nil
 }
 
@@ -329,6 +348,12 @@ func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
 		h.log.Warnw("Failed to write video", err)
 		return err
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"resourceID": h.resourceId,
+		"timestamp":  timestamp,
+		"dataLength": flvBody.Len(),
+	}).Error("Received video data")
 
 	return nil
 }
