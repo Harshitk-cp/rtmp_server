@@ -58,7 +58,7 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 
 			logrus.WithFields(logrus.Fields{
 				"remoteAddr": conn.RemoteAddr(),
-			}).Error("Client connected")
+			}).Info("Client connected")
 
 			h := NewRTMPHandler()
 			h.OnPublishCallback(func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
@@ -267,15 +267,16 @@ func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
 	if err := flvtag.DecodeAudioData(payload, &audio); err != nil {
 		return err
 	}
-
-	flvBody := new(bytes.Buffer)
-	if _, err := io.Copy(flvBody, audio.Data); err != nil {
+	audioBuffer := new(bytes.Buffer)
+	audioLength, err := io.Copy(audioBuffer, audio.Data)
+	if err != nil {
 		return err
 	}
-	audio.Data = flvBody
+
+	audio.Data = audioBuffer
 
 	if st := h.trackStats[types.Audio]; st != nil {
-		st.MediaReceived(int64(flvBody.Len()))
+		st.MediaReceived(int64(audioLength))
 	}
 
 	if h.audioInit == nil {
@@ -290,12 +291,6 @@ func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
 		h.log.Warnw("failed to write audio", err)
 		return err
 	}
-
-	logrus.WithFields(logrus.Fields{
-		"resourceID": h.resourceId,
-		"timestamp":  timestamp,
-		"dataLength": flvBody.Len(),
-	}).Error("Received audio data")
 
 	return nil
 }
@@ -317,14 +312,15 @@ func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
 		return err
 	}
 
-	flvBody := new(bytes.Buffer)
-	if _, err := io.Copy(flvBody, video.Data); err != nil {
+	videoBuffer := new(bytes.Buffer)
+	videoLength, err := io.Copy(videoBuffer, video.Data)
+	if err != nil {
 		return err
 	}
-	video.Data = flvBody
+	video.Data = videoBuffer
 
 	if st := h.trackStats[types.Video]; st != nil {
-		st.MediaReceived(int64(flvBody.Len()))
+		st.MediaReceived(int64(videoLength))
 	}
 
 	if h.videoInit == nil {
@@ -348,12 +344,6 @@ func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
 		h.log.Warnw("Failed to write video", err)
 		return err
 	}
-
-	logrus.WithFields(logrus.Fields{
-		"resourceID": h.resourceId,
-		"timestamp":  timestamp,
-		"dataLength": flvBody.Len(),
-	}).Error("Received video data")
 
 	return nil
 }
@@ -385,7 +375,6 @@ func (h *RTMPHandler) initFlvEncoder() error {
 	h.flvEnc = enc
 
 	if h.videoInit != nil {
-
 		if err := h.flvEnc.Encode(&flvtag.FlvTag{
 			TagType:   flvtag.TagTypeVideo,
 			Timestamp: 0,
@@ -395,7 +384,6 @@ func (h *RTMPHandler) initFlvEncoder() error {
 		}
 	}
 	if h.audioInit != nil {
-
 		if err := h.flvEnc.Encode(&flvtag.FlvTag{
 			TagType:   flvtag.TagTypeAudio,
 			Timestamp: 0,

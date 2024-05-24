@@ -3,6 +3,8 @@ package main
 import (
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
@@ -11,6 +13,7 @@ import (
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
 	"github.com/Harshitk-cp/rtmp_server/pkg/room"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
+	"github.com/Harshitk-cp/rtmp_server/pkg/service"
 	"github.com/Harshitk-cp/rtmp_server/pkg/stats"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -61,10 +64,12 @@ func main() {
 		logrus.Fatalf("Failed to load configuration: %v", err)
 	}
 
+	rtmpServer := rtmp.NewRTMPServer()
+	relay := service.NewRelay(rtmpServer)
+
 	gst.Init(nil)
 
 	go func() {
-		rtmpServer := rtmp.NewRTMPServer()
 		err := rtmpServer.Start(conf, func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
 
 			rm := room.NewRoomManager()
@@ -90,12 +95,28 @@ func main() {
 		}
 	}()
 
+	go func() {
+		err := relay.Start(conf)
+		if err != nil {
+			logrus.Fatalf("Failed to start RTMP relay: %v", err)
+		}
+	}()
+
 	logrus.Printf("Server starting on port %v", portString)
 
-	servErr := srv.ListenAndServe()
-	if servErr != nil {
-		logrus.Fatal(servErr)
-	}
+	// servErr := srv.ListenAndServe()
+	// if servErr != nil {
+	// 	logrus.Fatal(servErr)
+	// }
+
+	killChan := make(chan os.Signal, 1)
+	signal.Notify(killChan, syscall.SIGINT)
+	sig := <-killChan
+	logrus.Info("exit requested, shutting down", "signal", sig)
+
+	rtmpServer.Stop()
+	relay.Stop()
+	srv.Shutdown(nil)
 
 }
 

@@ -10,7 +10,6 @@ import (
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
-	"github.com/Harshitk-cp/rtmp_server/pkg/types"
 	"github.com/livekit/protocol/ingress"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/logger"
@@ -45,10 +44,6 @@ type Params struct {
 	ExtraParams any
 }
 
-type WhipExtraParams struct {
-	MimeTypes map[types.StreamKind]string `json:"mime_types"`
-}
-
 func InitLogger(conf *config.Config, info *livekit.IngressInfo, loggingFields map[string]string) error {
 	fields := getLoggerFields(info, loggingFields)
 
@@ -70,8 +65,6 @@ func GetParams(ctx context.Context, psrpcClient rpc.IOInfoClient, conf *config.C
 	switch info.InputType {
 	case livekit.IngressInput_RTMP_INPUT:
 		relayUrl = getRTMPRelayUrl(conf, info.State.ResourceId)
-	case livekit.IngressInput_WHIP_INPUT:
-		relayUrl = getWHIPRelayUrlPrefix(conf, info.State.ResourceId)
 	}
 
 	if relayToken == "" {
@@ -166,10 +159,6 @@ func getLoggerFields(info *livekit.IngressInfo, loggingFields map[string]string)
 
 func getRTMPRelayUrl(conf *config.Config, resourceId string) string {
 	return fmt.Sprintf("http://localhost:%d/rtmp/%s", conf.HTTPRelayPort, resourceId)
-}
-
-func getWHIPRelayUrlPrefix(conf *config.Config, resourceId string) string {
-	return fmt.Sprintf("http://localhost:%d/whip/%s", conf.HTTPRelayPort, resourceId)
 }
 
 func getAudioEncodingOptions(options *livekit.IngressAudioOptions) (*livekit.IngressAudioEncodingOptions, error) {

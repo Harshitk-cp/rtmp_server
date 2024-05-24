@@ -14,7 +14,6 @@ import (
 
 const (
 	DefaultRTMPPort      int = 1935
-	DefaultWHIPPort      int = 8080
 	DefaultHTTPRelayPort int = 9090
 )
 
@@ -33,7 +32,6 @@ type ServiceConfig struct {
 	DebugHandlerPort int           `yaml:"debug_handler_port"`
 	PrometheusPort   int           `yaml:"prometheus_port"`
 	RTMPPort         int           `yaml:"rtmp_port"` // -1 to disable RTMP
-	WHIPPort         int           `yaml:"whip_port"` // -1 to disable WHIP
 	HTTPRelayPort    int           `yaml:"http_relay_port"`
 	Logging          logger.Config `yaml:"logging"`
 	Development      bool          `yaml:"development"`
@@ -55,9 +53,6 @@ func (conf *ServiceConfig) InitDefaults() error {
 	}
 	if conf.HTTPRelayPort == 0 {
 		conf.HTTPRelayPort = DefaultHTTPRelayPort
-	}
-	if conf.WHIPPort == 0 {
-		conf.WHIPPort = DefaultWHIPPort
 	}
 	return nil
 }
