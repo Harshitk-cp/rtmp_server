@@ -15,6 +15,7 @@ import (
 	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/rpc"
 	"github.com/livekit/protocol/utils"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -33,13 +34,11 @@ type Params struct {
 	VideoEncodingOptions *livekit.IngressVideoEncodingOptions
 
 	WsUrl string
-	Token string
 
 	LoggingFields map[string]string
 
-	RelayUrl   string
-	RelayToken string
-	TmpDir     string
+	RelayUrl string
+	TmpDir   string
 
 	ExtraParams any
 }
@@ -121,9 +120,7 @@ func GetParams(ctx context.Context, psrpcClient rpc.IOInfoClient, conf *config.C
 		Config:               conf,
 		AudioEncodingOptions: audioEncodingOptions,
 		VideoEncodingOptions: videoEncodingOptions,
-		Token:                token,
 		WsUrl:                wsUrl,
-		RelayToken:           relayToken,
 		LoggingFields:        loggingFields,
 		RelayUrl:             relayUrl,
 		TmpDir:               tmpDir,
@@ -158,6 +155,7 @@ func getLoggerFields(info *livekit.IngressInfo, loggingFields map[string]string)
 }
 
 func getRTMPRelayUrl(conf *config.Config, resourceId string) string {
+	logrus.Errorf("http://localhost:%d/rtmp/%s", conf.HTTPRelayPort, resourceId)
 	return fmt.Sprintf("http://localhost:%d/rtmp/%s", conf.HTTPRelayPort, resourceId)
 }
 

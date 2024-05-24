@@ -15,7 +15,6 @@ var (
 	ErrDuplicateTrack               = errors.New("more than 1 track with given media kind")
 	ErrUnableToAddPad               = errors.New("could not add pads to bin")
 	ErrMissingResourceId            = errors.New("missing resource ID")
-	ErrInvalidRelayToken            = errors.New("invalid token")
 	ErrIngressNotFound              = errors.New("ingress not found")
 	ErrServerCapacityExceeded       = errors.New("server capacity exceeded")
 	ErrServerShuttingDown           = errors.New("server shutting down")

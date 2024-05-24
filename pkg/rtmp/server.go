@@ -63,10 +63,10 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 			h := NewRTMPHandler()
 			h.OnPublishCallback(func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
 				var params *params.Params
-				var stats *stats.LocalMediaStatsGatherer
+				var statsGatherer *stats.LocalMediaStatsGatherer
 				var err error
 				if onPublish != nil {
-					params, stats, err = onPublish(streamKey, resourceId)
+					params, statsGatherer, err = onPublish(streamKey, resourceId)
 					if err != nil {
 						return nil, nil, err
 					}
@@ -74,7 +74,14 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 
 				s.handlers.Store(resourceId, h)
 
-				return params, stats, nil
+				go func() {
+					err := h.RelayStream("rtmp://localhost:9090/live", streamKey)
+					if err != nil {
+						log.Printf("Failed to relay stream: %v", err)
+					}
+				}()
+
+				return params, statsGatherer, nil
 			})
 			h.OnCloseCallback(func(resourceId string) {
 				s.handlers.Delete(resourceId)
@@ -102,38 +109,6 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 	return nil
 }
 
-func (s *RTMPServer) AssociateRelay(resourceId string, token string, w io.WriteCloser) error {
-	h, ok := s.handlers.Load(resourceId)
-	if ok && h != nil {
-		if h.(*RTMPHandler).params.RelayToken != token {
-			return errors.ErrInvalidRelayToken
-		}
-
-		err := h.(*RTMPHandler).SetWriter(w)
-		if err != nil {
-			return err
-		}
-	} else {
-		return errors.ErrIngressNotFound
-	}
-
-	return nil
-}
-
-func (s *RTMPServer) DissociateRelay(resourceId string) error {
-	h, ok := s.handlers.Load(resourceId)
-	if ok && h != nil {
-		err := h.(*RTMPHandler).SetWriter(nil)
-		if err != nil {
-			return err
-		}
-	} else {
-		return errors.ErrIngressNotFound
-	}
-
-	return nil
-}
-
 func (s *RTMPServer) CloseHandler(resourceId string) {
 	h, ok := s.handlers.Load(resourceId)
 	if ok && h != nil {
@@ -156,6 +131,7 @@ type RTMPHandler struct {
 	audioInit     *flvtag.AudioData
 	keyFrameFound bool
 	mediaBuffer   *utils.PrerollBuffer
+	RelayUrl      string
 
 	log    logger.Logger
 	closed core.Fuse
@@ -198,14 +174,18 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 	h.resourceId = protoutils.NewGuid(protoutils.RTMPResourcePrefix)
 	h.log = logger.GetLogger().WithValues("appName", appName, "streamKey", streamKey, "resourceID", h.resourceId)
 	if h.onPublish != nil {
-		params, st, err := h.onPublish(streamKey, h.resourceId)
+		params, statsGatherer, err := h.onPublish(streamKey, h.resourceId)
 		if err != nil {
 			return err
 		}
 		h.params = params
 
-		h.trackStats[types.Audio] = st.RegisterTrackStats(stats.InputAudio)
-		h.trackStats[types.Video] = st.RegisterTrackStats(stats.InputVideo)
+		if statsGatherer == nil {
+			statsGatherer = stats.NewLocalMediaStatsGatherer()
+		}
+
+		h.trackStats[types.Audio] = statsGatherer.RegisterTrackStats(stats.InputAudio)
+		h.trackStats[types.Video] = statsGatherer.RegisterTrackStats(stats.InputVideo)
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -218,6 +198,61 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 	h.log.Infow("Received a new published stream")
 
 	return nil
+}
+
+const (
+	chunkSize = 128
+)
+
+func (h *RTMPHandler) RelayStream(rtmpURL, streamKey string) error {
+	conn, err := rtmp.Dial("rtmp", "localhost:1935", &rtmp.ConnConfig{
+		Logger: log.StandardLogger(),
+	})
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if err := conn.Connect(nil); err != nil {
+		return err
+	}
+
+	stream, err := conn.CreateStream(nil, chunkSize)
+	if err != nil {
+		log.Fatalf("Failed to create stream: Err=%+v", err)
+	}
+	defer stream.Close()
+
+	var timestamp uint32
+	for {
+		var flvTag flvtag.FlvTag
+		// if err := h.flvEnc.Decode(&flvTag); err != nil {
+		// 	if err == io.EOF {
+		// 		break
+		// 	}
+		// 	return err
+		// }
+
+		var msg rtmpmsg.Message
+		switch flvTag.TagType {
+		case flvtag.TagTypeAudio:
+			msg = &rtmpmsg.AudioMessage{
+				Payload: flvTag.Data.(*flvtag.AudioData).Data,
+			}
+		case flvtag.TagTypeVideo:
+			msg = &rtmpmsg.VideoMessage{
+				Payload: flvTag.Data.(*flvtag.VideoData).Data,
+			}
+		default:
+			continue
+		}
+
+		if err := stream.Write(0, timestamp, msg); err != nil {
+			return err
+		}
+
+		timestamp += flvTag.Timestamp
+	}
 }
 
 func (h *RTMPHandler) OnSetDataFrame(timestamp uint32, data *rtmpmsg.NetStreamSetDataFrame) error {
@@ -252,97 +287,54 @@ func (h *RTMPHandler) OnSetDataFrame(timestamp uint32, data *rtmpmsg.NetStreamSe
 }
 
 func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
-	if h.closed.IsBroken() {
-		return io.EOF
-	}
-
-	if h.flvEnc == nil {
-		err := h.initFlvEncoder()
-		if err != nil {
-			return err
-		}
-	}
-
 	var audio flvtag.AudioData
 	if err := flvtag.DecodeAudioData(payload, &audio); err != nil {
 		return err
 	}
+	// Ensure data is read correctly
 	audioBuffer := new(bytes.Buffer)
-	audioLength, err := io.Copy(audioBuffer, audio.Data)
-	if err != nil {
+	if _, err := io.Copy(audioBuffer, audio.Data); err != nil {
 		return err
 	}
-
 	audio.Data = audioBuffer
-
-	if st := h.trackStats[types.Audio]; st != nil {
-		st.MediaReceived(int64(audioLength))
-	}
-
-	if h.audioInit == nil {
-		h.audioInit = copyAudioTag(&audio)
-	}
 
 	if err := h.flvEnc.Encode(&flvtag.FlvTag{
 		TagType:   flvtag.TagTypeAudio,
 		Timestamp: timestamp,
 		Data:      &audio,
 	}); err != nil {
-		h.log.Warnw("failed to write audio", err)
-		return err
+		log.Printf("Failed to write audio: %+v", err)
 	}
-
 	return nil
 }
 
 func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
-	if h.closed.IsBroken() {
-		return io.EOF
-	}
-
-	if h.flvEnc == nil {
-		err := h.initFlvEncoder()
-		if err != nil {
-			return err
-		}
-	}
-
 	var video flvtag.VideoData
 	if err := flvtag.DecodeVideoData(payload, &video); err != nil {
 		return err
 	}
 
-	videoBuffer := new(bytes.Buffer)
-	videoLength, err := io.Copy(videoBuffer, video.Data)
-	if err != nil {
+	flvBody := new(bytes.Buffer)
+	if _, err := io.Copy(flvBody, video.Data); err != nil {
 		return err
 	}
-	video.Data = videoBuffer
+	video.Data = flvBody
 
-	if st := h.trackStats[types.Video]; st != nil {
-		st.MediaReceived(int64(videoLength))
-	}
-
-	if h.videoInit == nil {
-		h.videoInit = copyVideoTag(&video)
-	}
-
-	if !h.keyFrameFound {
-		if video.FrameType == flvtag.FrameTypeKeyFrame {
-			h.log.Infow("key frame found")
-			h.keyFrameFound = true
-		} else {
-			return nil
-		}
-	}
+	// log.Printf("FLV Video Data: Timestamp = %d, FrameType = %+v, CodecID = %+v, AVCPacketType = %+v, CT = %+v, Data length = %+v",
+	// 	timestamp,
+	// 	video.FrameType,
+	// 	video.CodecID,
+	// 	video.AVCPacketType,
+	// 	video.CompositionTime,
+	// 	len(flvBody.Bytes()),
+	// )
 
 	if err := h.flvEnc.Encode(&flvtag.FlvTag{
 		TagType:   flvtag.TagTypeVideo,
 		Timestamp: timestamp,
 		Data:      &video,
 	}); err != nil {
-		h.log.Warnw("Failed to write video", err)
-		return err
+		log.Printf("Failed to write video: Err = %+v", err)
 	}
 
 	return nil
@@ -356,10 +348,6 @@ func (h *RTMPHandler) OnClose() {
 	if h.onClose != nil {
 		h.onClose(h.resourceId)
 	}
-}
-
-func (h *RTMPHandler) SetWriter(w io.WriteCloser) error {
-	return h.mediaBuffer.SetWriter(w)
 }
 
 func (h *RTMPHandler) Close() {
@@ -408,16 +396,4 @@ func copyAudioTag(in *flvtag.AudioData) *flvtag.AudioData {
 	ret.Data = bytes.NewBuffer(in.Data.(*bytes.Buffer).Bytes())
 
 	return &ret
-}
-
-func (s *RTMPServer) GetStream(resourceId string) (io.Reader, error) {
-	h, ok := s.handlers.Load(resourceId)
-	if !ok || h == nil {
-		return nil, errors.ErrDuplicateTrack
-	}
-	return h.(*RTMPHandler).MediaBuffer(), nil
-}
-
-func (h *RTMPHandler) MediaBuffer() io.Reader {
-	return h.mediaBuffer
 }
