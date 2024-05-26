@@ -12,7 +12,6 @@ require (
 	github.com/livekit/server-sdk-go/v2 v2.1.2
 	github.com/sirupsen/logrus v1.9.3
 	github.com/yutopp/go-flv v0.3.1
-	github.com/yutopp/go-rtmp v0.0.6
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -70,8 +69,9 @@ require (
 	github.com/klauspost/compress v1.17.6 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.6 // indirect
 	github.com/lithammer/shortuuid/v4 v4.0.0 // indirect
+	github.com/livekit/go-rtmp v0.0.0-20230829211117-1c4f5a5c81ed
 	github.com/livekit/mageutil v0.0.0-20230125210925-54e8a70427c1 // indirect
-	github.com/livekit/psrpc v0.5.3-0.20240403150641-811331b106d9 // indirect
+	github.com/livekit/psrpc v0.5.3-0.20240403150641-811331b106d9
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/nats-io/nats.go v1.31.0 // indirect
 	github.com/nats-io/nkeys v0.4.7 // indirect
@@ -82,6 +82,7 @@ require (
 	github.com/redis/go-redis/v9 v9.5.1 // indirect
 	github.com/twitchtv/twirp v8.1.3+incompatible // indirect
 	github.com/yutopp/go-amf0 v0.1.0 // indirect
+	github.com/yutopp/go-rtmp v0.0.6
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect

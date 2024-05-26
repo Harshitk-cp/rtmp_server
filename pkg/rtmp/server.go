@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path"
 	"sync"
+	"time"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
@@ -34,8 +36,7 @@ func NewRTMPServer() *RTMPServer {
 	return &RTMPServer{}
 }
 
-func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error)) error {
-	port := conf.RTMPPort
+func (s *RTMPServer) Start(port int, conf *config.Config, onPublish func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error)) error {
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -48,6 +49,26 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 		return err
 	}
 
+	h, _ := NewRTMPHandler()
+	h.OnPublishCallback(func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
+		var params *params.Params
+		var statsGatherer *stats.LocalMediaStatsGatherer
+		var err error
+		if onPublish != nil {
+			params, statsGatherer, err = onPublish(streamKey, resourceId)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+
+		s.handlers.Store(resourceId, h)
+
+		return params, statsGatherer, nil
+	})
+	h.OnCloseCallback(func(resourceId string) {
+		s.handlers.Delete(resourceId)
+	})
+
 	srv := rtmp.NewServer(&rtmp.ServerConfig{
 		OnConnect: func(conn net.Conn) (io.ReadWriteCloser, *rtmp.ConnConfig) {
 			l := log.StandardLogger()
@@ -59,33 +80,6 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 			logrus.WithFields(logrus.Fields{
 				"remoteAddr": conn.RemoteAddr(),
 			}).Info("Client connected")
-
-			h := NewRTMPHandler()
-			h.OnPublishCallback(func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
-				var params *params.Params
-				var statsGatherer *stats.LocalMediaStatsGatherer
-				var err error
-				if onPublish != nil {
-					params, statsGatherer, err = onPublish(streamKey, resourceId)
-					if err != nil {
-						return nil, nil, err
-					}
-				}
-
-				s.handlers.Store(resourceId, h)
-
-				go func() {
-					err := h.RelayStream("rtmp://localhost:9090/live", streamKey)
-					if err != nil {
-						log.Printf("Failed to relay stream: %v", err)
-					}
-				}()
-
-				return params, statsGatherer, nil
-			})
-			h.OnCloseCallback(func(resourceId string) {
-				s.handlers.Delete(resourceId)
-			})
 
 			return conn, &rtmp.ConnConfig{
 				Handler: h,
@@ -132,6 +126,9 @@ type RTMPHandler struct {
 	keyFrameFound bool
 	mediaBuffer   *utils.PrerollBuffer
 	RelayUrl      string
+	relayConn     *rtmp.ClientConn
+	relayStream   *rtmp.Stream
+	flvFile       *os.File
 
 	log    logger.Logger
 	closed core.Fuse
@@ -140,7 +137,7 @@ type RTMPHandler struct {
 	onClose   func(resourceId string)
 }
 
-func NewRTMPHandler() *RTMPHandler {
+func NewRTMPHandler() (*RTMPHandler, *utils.PrerollBuffer) {
 	h := &RTMPHandler{
 		log:        logger.GetLogger(),
 		trackStats: make(map[types.StreamKind]*stats.MediaTrackStatGatherer),
@@ -153,7 +150,40 @@ func NewRTMPHandler() *RTMPHandler {
 		return nil
 	})
 
-	return h
+	return h, h.mediaBuffer
+}
+
+func (s *RTMPServer) AssociateRelay(resourceId string, w io.WriteCloser) error {
+	h, ok := s.handlers.Load(resourceId)
+	if ok && h != nil {
+
+		err := h.(*RTMPHandler).SetWriter(w)
+		if err != nil {
+			return err
+		}
+	} else {
+		return errors.ErrIngressNotFound
+	}
+
+	return nil
+}
+
+func (s *RTMPServer) DissociateRelay(resourceId string) error {
+	h, ok := s.handlers.Load(resourceId)
+	if ok && h != nil {
+		err := h.(*RTMPHandler).SetWriter(nil)
+		if err != nil {
+			return err
+		}
+	} else {
+		return errors.ErrIngressNotFound
+	}
+
+	return nil
+}
+
+func (h *RTMPHandler) SetWriter(w io.WriteCloser) error {
+	return h.mediaBuffer.SetWriter(w)
 }
 
 func (h *RTMPHandler) OnPublishCallback(cb func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error)) {
@@ -197,90 +227,120 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 
 	h.log.Infow("Received a new published stream")
 
+	// p := filepath.Join(
+	// 	os.TempDir(),
+	// 	filepath.Clean(filepath.Join("../", fmt.Sprintf("%s.flv", cmd.PublishingName))),
+	// )
+	// f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, 0666)
+	// if err != nil {
+	// 	return err
+	// }
+	// h.flvFile = f
+
+	// enc, err := flv.NewEncoder(f, flv.FlagsAudio|flv.FlagsVideo)
+	// if err != nil {
+	// 	_ = f.Close()
+	// 	return err
+	// }
+	// h.flvEnc = enc
+
+	if h.relayStream == nil {
+
+		go func() {
+			err := h.RelayStream("key")
+			logrus.Info("created new relay stream")
+
+			if err != nil {
+				logrus.Printf("Failed to relay stream: %v", err)
+			}
+		}()
+	} else {
+		logrus.Info("Relay stream already created")
+	}
+
 	return nil
 }
 
 const (
-	chunkSize = 128
+	chunkSize = 8192
 )
 
-func (h *RTMPHandler) RelayStream(rtmpURL, streamKey string) error {
-	conn, err := rtmp.Dial("rtmp", "localhost:1935", &rtmp.ConnConfig{
-		Logger: log.StandardLogger(),
+func (s *RTMPHandler) RelayStream(streamKey string) error {
+
+	dialer := &net.Dialer{
+		Timeout:   180 * time.Second,
+		KeepAlive: 180 * time.Second,
+	}
+
+	conn, err := rtmp.DialWithDialer(dialer, "rtmp", "127.0.0.1:9090", &rtmp.ConnConfig{
+		Logger: logrus.StandardLogger(),
 	})
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	if err := conn.Connect(nil); err != nil {
+	connectCommand := &rtmpmsg.NetConnectionConnect{
+		Command: rtmpmsg.NetConnectionConnectCommand{
+			App:            "streamix",
+			Type:           "nonprivate",
+			FlashVer:       "FMLE/3.0",
+			TCURL:          "rtmp://localhost",
+			Fpad:           false,
+			Capabilities:   239,
+			AudioCodecs:    3575,
+			VideoCodecs:    252,
+			VideoFunction:  1,
+			ObjectEncoding: 0,
+		},
+	}
+
+	if err := conn.Connect(connectCommand); err != nil {
 		return err
 	}
 
-	stream, err := conn.CreateStream(nil, chunkSize)
+	createStreamCommand := &rtmpmsg.NetConnectionCreateStream{}
+
+	stream, err := conn.CreateStream(createStreamCommand, chunkSize)
 	if err != nil {
-		log.Fatalf("Failed to create stream: Err=%+v", err)
+		return err
 	}
 	defer stream.Close()
 
-	var timestamp uint32
-	for {
-		var flvTag flvtag.FlvTag
-		// if err := h.flvEnc.Decode(&flvTag); err != nil {
-		// 	if err == io.EOF {
-		// 		break
-		// 	}
-		// 	return err
-		// }
-
-		var msg rtmpmsg.Message
-		switch flvTag.TagType {
-		case flvtag.TagTypeAudio:
-			msg = &rtmpmsg.AudioMessage{
-				Payload: flvTag.Data.(*flvtag.AudioData).Data,
-			}
-		case flvtag.TagTypeVideo:
-			msg = &rtmpmsg.VideoMessage{
-				Payload: flvTag.Data.(*flvtag.VideoData).Data,
-			}
-		default:
-			continue
-		}
-
-		if err := stream.Write(0, timestamp, msg); err != nil {
-			return err
-		}
-
-		timestamp += flvTag.Timestamp
+	if err := stream.Publish(&rtmpmsg.NetStreamPublish{
+		PublishingName: "streamix",
+		PublishingType: "live",
+	}); err != nil {
+		logrus.Errorf("Failed to publish stream: %v", err)
 	}
+	s.relayStream = stream
+
+	return nil
 }
 
 func (h *RTMPHandler) OnSetDataFrame(timestamp uint32, data *rtmpmsg.NetStreamSetDataFrame) error {
-	if h.closed.IsBroken() {
-		return io.EOF
-	}
+	r := bytes.NewReader(data.Payload)
 
 	if h.flvEnc == nil {
-		err := h.initFlvEncoder()
-		if err != nil {
+		if err := h.initFlvEncoder(); err != nil {
 			return err
 		}
 	}
-	r := bytes.NewReader(data.Payload)
 
 	var script flvtag.ScriptData
 	if err := flvtag.DecodeScriptData(r, &script); err != nil {
-		h.log.Errorw("failed to decode script data", err)
+		log.Printf("Failed to decode script data: Err = %+v", err)
 		return nil
 	}
+
+	log.Printf("SetDataFrame: Script = %#v", script)
 
 	if err := h.flvEnc.Encode(&flvtag.FlvTag{
 		TagType:   flvtag.TagTypeScriptData,
 		Timestamp: timestamp,
 		Data:      &script,
 	}); err != nil {
-		h.log.Warnw("failed to forward script data", err)
-		return err
+		log.Printf("Failed to write script data: Err = %+v", err)
 	}
 
 	return nil
@@ -291,20 +351,43 @@ func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
 	if err := flvtag.DecodeAudioData(payload, &audio); err != nil {
 		return err
 	}
-	// Ensure data is read correctly
-	audioBuffer := new(bytes.Buffer)
-	if _, err := io.Copy(audioBuffer, audio.Data); err != nil {
+
+	flvBody := new(bytes.Buffer)
+	if _, err := io.Copy(flvBody, audio.Data); err != nil {
 		return err
 	}
-	audio.Data = audioBuffer
+	audio.Data = flvBody
+
+	// log.Printf("FLV Audio Data: Timestamp = %d, SoundFormat = %+v, SoundRate = %+v, SoundSize = %+v, SoundType = %+v, AACPacketType = %+v, Data length = %+v",
+	// 	timestamp,
+	// 	audio.SoundFormat,
+	// 	audio.SoundRate,
+	// 	audio.SoundSize,
+	// 	audio.SoundType,
+	// 	audio.AACPacketType,
+	// 	len(flvBody.Bytes()),
+	// )
 
 	if err := h.flvEnc.Encode(&flvtag.FlvTag{
 		TagType:   flvtag.TagTypeAudio,
 		Timestamp: timestamp,
 		Data:      &audio,
 	}); err != nil {
-		log.Printf("Failed to write audio: %+v", err)
+		log.Printf("Failed to write audio: Err = %+v", err)
 	}
+
+	if h.relayStream != nil {
+		// msg := &rtmpmsg.AudioMessage{
+		// 	Payload: audio.Data,
+		// }
+		// err := h.writeToStream(4, timestamp, msg)
+		// if err != nil {
+		// 	logrus.Errorf("Failed to write audio to relay stream: %v", err)
+		// }
+	} else {
+		logrus.Error("Relay stream is not initialized on audio")
+	}
+
 	return nil
 }
 
@@ -337,6 +420,76 @@ func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
 		log.Printf("Failed to write video: Err = %+v", err)
 	}
 
+	if h.relayStream != nil {
+		msg := &rtmpmsg.VideoMessage{
+			Payload: video.Data,
+		}
+
+		err := h.writeToStream(6, timestamp, msg)
+		if err != nil {
+			logrus.Errorf("Failed to write video to relay stream: %v", err)
+		}
+	} else {
+		logrus.Error("Relay stream is not initialized on video")
+	}
+
+	return nil
+}
+
+func (h *RTMPHandler) writeToStream(chunkStreamID int, timestamp uint32, msg rtmpmsg.Message) error {
+
+	stream := h.relayStream
+	if stream == nil {
+		log.Error("no relay stream found")
+		return nil
+	}
+	logrus.Infof("Message payload length before encoding: %d", msg)
+
+	chunkSize := 1024
+	payload := new(bytes.Buffer)
+	enc := rtmpmsg.NewEncoder(payload)
+	if err := enc.Encode(msg); err != nil {
+		return err
+	}
+
+	data := payload.Bytes()
+
+	chunk := data
+	if len(chunk) > chunkSize {
+		chunk = chunk[:chunkSize]
+	}
+
+	logrus.Infof("setting chunk : ChunkStreamID = %d, Timestamp = %d, Length = %d", chunkStreamID, timestamp, len(chunk))
+	if err := stream.WriteSetChunkSize(uint32(chunkSize)); err != nil {
+		return err
+	}
+
+	logrus.Infof("Writing data to relay stream: ChunkStreamID = %d, Timestamp = %d, Length = %d", chunkStreamID, timestamp, len(chunk))
+
+	if err := stream.Write(chunkStreamID, timestamp, msg); err != nil {
+		logrus.Errorf("Failed to write data to relay stream: %v", err)
+		return err
+	}
+	logrus.Infof("Writing data to relay stream: ChunkStreamID = %d, Timestamp = %d, Length = %d", chunkStreamID, timestamp, len(chunk))
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- stream.Write(chunkStreamID, timestamp, nil)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			logrus.Errorf("Failed to write data to relay stream: %v", err)
+			return err
+		}
+	case <-time.After(10 * time.Second):
+		log.Error("timeout while writing to relay stream")
+		return nil
+	}
+
+	logrus.Info("Data written to relay stream successfully")
+
 	return nil
 }
 
@@ -344,6 +497,15 @@ func (h *RTMPHandler) OnClose() {
 	h.log.Infow("closing ingress RTMP session")
 
 	h.mediaBuffer.Close()
+
+	if h.relayStream != nil {
+		h.relayStream.Close()
+		h.relayStream = nil
+	}
+	if h.relayConn != nil {
+		h.relayConn.Close()
+		h.relayConn = nil
+	}
 
 	if h.onClose != nil {
 		h.onClose(h.resourceId)
@@ -356,6 +518,12 @@ func (h *RTMPHandler) Close() {
 
 func (h *RTMPHandler) initFlvEncoder() error {
 	h.keyFrameFound = false
+
+	_, err := h.mediaBuffer.Write([]byte{0x46, 0x4C, 0x56})
+	if err != nil {
+		return err
+	}
+
 	enc, err := flv.NewEncoder(h.mediaBuffer, flv.FlagsAudio|flv.FlagsVideo)
 	if err != nil {
 		return err

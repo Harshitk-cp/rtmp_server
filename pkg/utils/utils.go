@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	maxBufferSize = 10000000000
+	maxBufferSize = 100000000
 )
 
 type PrerollBuffer struct {

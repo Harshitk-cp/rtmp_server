@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
+	"github.com/Harshitk-cp/rtmp_server/pkg/utils"
 	"github.com/go-gst/go-gst/gst"
 	"github.com/sirupsen/logrus"
 )
@@ -25,7 +26,7 @@ func NewTranscoder() *Transcoder {
 	return &Transcoder{}
 }
 
-func (t *Transcoder) Start(rtmpServer *rtmp.RTMPServer, resourceID string) error {
+func (t *Transcoder) Start(rtmpServer *rtmp.RTMPServer, resourceID string, mediaBuffer *utils.PrerollBuffer) error {
 	t.rtmpServer = rtmpServer
 	t.resourceID = resourceID
 
@@ -62,6 +63,7 @@ func (t *Transcoder) Start(rtmpServer *rtmp.RTMPServer, resourceID string) error
 		return fmt.Errorf("failed to create rtmpsrc element: %w", err)
 	}
 	t.gstPipeline.Add(rtmpsrc)
+
 	rtph264pay, err := gst.NewElementWithName("rtph264pay", "rtph264pay")
 	if err != nil {
 		return fmt.Errorf("failed to create rtph264pay element: %w", err)
@@ -73,46 +75,56 @@ func (t *Transcoder) Start(rtmpServer *rtmp.RTMPServer, resourceID string) error
 		return fmt.Errorf("failed to create aacpay element: %w", err)
 	}
 	t.gstPipeline.Add(aacpay)
+
+	flvdemux, err := gst.NewElementWithName("flvdemux", "flv-demux")
+	if err != nil {
+		return fmt.Errorf("failed to create flvdemux element: %w", err)
+	}
+	t.gstPipeline.Add(flvdemux)
+
+	rtmpsrc.Link(flvdemux)
+
 	rtmpsrc.Link(rtph264pay)
 	rtph264pay.Link(aacpay)
 
 	appName := "live"
-
-	if err := rtmpsrc.SetProperty("location", fmt.Sprintf("rtmp://localhost:1935/%s/%s", appName, resourceID)); err != nil {
+	if err := rtmpsrc.SetProperty("location", fmt.Sprintf("rtmp://localhost:1935/%s/%s", appName, "ky")); err != nil {
 		return fmt.Errorf("failed to set rtmpsrc location: %w", err)
 	}
 
-	sink, err := gst.NewElement("fakesink")
+	muxer, err := gst.NewElementWithName("qtmux", "muxer")
 	if err != nil {
-		return fmt.Errorf("failed to create fakesink element: %w", err)
+		return fmt.Errorf("failed to create muxer element: %w", err)
+	}
+	t.muxer = muxer
+	t.gstPipeline.Add(muxer)
+
+	aacpay.Link(muxer)
+	rtph264pay.Link(muxer)
+
+	appsink, err := gst.NewElementWithName("appsink", "app-sink")
+	if err != nil {
+		return fmt.Errorf("failed to create appsink element: %w", err)
+	}
+	t.gstPipeline.Add(appsink)
+
+	appsink.SetProperty("sync", false)
+	appsink.SetProperty("emit-signals", true)
+	appsink.SetProperty("drop", false)
+
+	appSinkWriter := utils.NewAppSinkWriter(appsink)
+
+	if err := mediaBuffer.SetWriter(appSinkWriter); err != nil {
+		return fmt.Errorf("failed to set PrerollBuffer writer: %w", err)
 	}
 
-	t.gstPipeline.Add(sink)
-	aacpay.Link(sink)
+	muxer.Link(appsink)
 
 	err = t.gstPipeline.SetState(gst.StatePlaying)
 	if err != nil {
 		t.gstPipeline.SetState(gst.StateNull)
 		return fmt.Errorf("failed to start GStreamer pipeline: %w", err)
 	}
-
-	// go func() {
-	// 	bus := t.gstPipeline.GetBus()
-	// 	for {
-	// 		msg := bus.Pop()
-	// 		if msg == nil {
-	// 			break
-	// 		}
-
-	// 		switch msg.Type() {
-	// 		case gst.MessageEOS:
-	// 			logrus.Info("Transcoder pipeline reached EOS (End of Stream)")
-	// 			t.gstPipeline.SetState(gst.StateNull)
-	// 			return
-	// 		default:
-	// 		}
-	// 	}
-	// }()
 
 	return nil
 }

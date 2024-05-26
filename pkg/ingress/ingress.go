@@ -1,6 +1,8 @@
 package ingress
 
 import (
+	"fmt"
+
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/media"
 	"github.com/Harshitk-cp/rtmp_server/pkg/room"
@@ -36,17 +38,23 @@ func (i *Ingress) SetParticipant(participant *room.Participant) {
 }
 
 func (i *Ingress) Start() error {
-
 	if i.transcoder == nil {
 		i.transcoder = media.NewTranscoder()
 	}
 
-	go func() {
-		err := i.transcoder.Start(i.rtmpServer, i.participant.ID)
-		if err != nil {
-			logrus.Printf("Failed to start transcoder: %v", err)
-		}
-	}()
+	if i.rtmpServer == nil || i.participant == nil || i.participant.ID == "" {
+		return fmt.Errorf("rtmpServer or participant.ID is nil")
+	}
+
+	_, mediaBuffer := rtmp.NewRTMPHandler()
+
+	// go func() {
+	err := i.transcoder.Start(i.rtmpServer, i.participant.ID, mediaBuffer)
+	if err != nil {
+		logrus.Printf("Failed to start transcoder: %v", err)
+	}
+	// }()
+
 	go func() {
 		err := i.webrtcSignal.Start(i.participant)
 		if err != nil {

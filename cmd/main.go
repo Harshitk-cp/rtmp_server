@@ -11,6 +11,7 @@ import (
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
 	"github.com/Harshitk-cp/rtmp_server/pkg/room"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
+	"github.com/Harshitk-cp/rtmp_server/pkg/service"
 	"github.com/Harshitk-cp/rtmp_server/pkg/stats"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -62,11 +63,12 @@ func main() {
 	}
 
 	rtmpServer := rtmp.NewRTMPServer()
+	relay := service.NewRelay()
 
 	gst.Init(nil)
 
 	go func() {
-		err := rtmpServer.Start(conf, func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
+		err := rtmpServer.Start(1935, conf, func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
 
 			rm := room.NewRoomManager()
 			r, _ := rm.GetRoom(streamKey)
@@ -88,6 +90,13 @@ func main() {
 		})
 		if err != nil {
 			logrus.Fatalf("Failed to start RTMP server: %v", err)
+		}
+	}()
+
+	go func() {
+		err := relay.Start(conf, 9090)
+		if err != nil {
+			logrus.Fatalf("Failed to start RTMP relay: %v", err)
 		}
 	}()
 
