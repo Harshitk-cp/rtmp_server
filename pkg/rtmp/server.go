@@ -11,8 +11,6 @@ import (
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
-	"github.com/Harshitk-cp/rtmp_server/pkg/stats"
-	"github.com/Harshitk-cp/rtmp_server/pkg/types"
 	"github.com/Harshitk-cp/rtmp_server/pkg/utils"
 	"github.com/frostbyte73/core"
 	"github.com/livekit/protocol/logger"
@@ -34,7 +32,7 @@ func NewRTMPServer() *RTMPServer {
 	return &RTMPServer{}
 }
 
-func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error)) error {
+func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resourceId string) (*params.Params, error)) error {
 	port := conf.RTMPPort
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", port))
@@ -61,14 +59,13 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 			}).Info("Client connected")
 
 			h := NewRTMPHandler()
-			h.OnPublishCallback(func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error) {
+			h.OnPublishCallback(func(streamKey, resourceId string) (*params.Params, error) {
 				var params *params.Params
-				var statsGatherer *stats.LocalMediaStatsGatherer
 				var err error
 				if onPublish != nil {
-					params, statsGatherer, err = onPublish(streamKey, resourceId)
+					params, err = onPublish(streamKey, resourceId)
 					if err != nil {
-						return nil, nil, err
+						return nil, err
 					}
 				}
 
@@ -81,7 +78,7 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 					}
 				}()
 
-				return params, statsGatherer, nil
+				return params, nil
 			})
 			h.OnCloseCallback(func(resourceId string) {
 				s.handlers.Delete(resourceId)
@@ -109,6 +106,35 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 	return nil
 }
 
+func (s *RTMPServer) AssociateRelay(resourceId string, w io.WriteCloser) error {
+	h, ok := s.handlers.Load(resourceId)
+	if ok && h != nil {
+
+		err := h.(*RTMPHandler).SetWriter(w)
+		if err != nil {
+			return err
+		}
+	} else {
+		return errors.ErrIngressNotFound
+	}
+
+	return nil
+}
+
+func (s *RTMPServer) DissociateRelay(resourceId string) error {
+	h, ok := s.handlers.Load(resourceId)
+	if ok && h != nil {
+		err := h.(*RTMPHandler).SetWriter(nil)
+		if err != nil {
+			return err
+		}
+	} else {
+		return errors.ErrIngressNotFound
+	}
+
+	return nil
+}
+
 func (s *RTMPServer) CloseHandler(resourceId string) {
 	h, ok := s.handlers.Load(resourceId)
 	if ok && h != nil {
@@ -124,7 +150,6 @@ type RTMPHandler struct {
 	rtmp.DefaultHandler
 
 	flvEnc        *flv.Encoder
-	trackStats    map[types.StreamKind]*stats.MediaTrackStatGatherer
 	params        *params.Params
 	resourceId    string
 	videoInit     *flvtag.VideoData
@@ -136,14 +161,13 @@ type RTMPHandler struct {
 	log    logger.Logger
 	closed core.Fuse
 
-	onPublish func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error)
+	onPublish func(streamKey, resourceId string) (*params.Params, error)
 	onClose   func(resourceId string)
 }
 
 func NewRTMPHandler() *RTMPHandler {
 	h := &RTMPHandler{
-		log:        logger.GetLogger(),
-		trackStats: make(map[types.StreamKind]*stats.MediaTrackStatGatherer),
+		log: logger.GetLogger(),
 	}
 
 	h.mediaBuffer = utils.NewPrerollBuffer(func() error {
@@ -156,7 +180,7 @@ func NewRTMPHandler() *RTMPHandler {
 	return h
 }
 
-func (h *RTMPHandler) OnPublishCallback(cb func(streamKey, resourceId string) (*params.Params, *stats.LocalMediaStatsGatherer, error)) {
+func (h *RTMPHandler) OnPublishCallback(cb func(streamKey, resourceId string) (*params.Params, error)) {
 	h.onPublish = cb
 }
 
@@ -174,18 +198,12 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 	h.resourceId = protoutils.NewGuid(protoutils.RTMPResourcePrefix)
 	h.log = logger.GetLogger().WithValues("appName", appName, "streamKey", streamKey, "resourceID", h.resourceId)
 	if h.onPublish != nil {
-		params, statsGatherer, err := h.onPublish(streamKey, h.resourceId)
+		params, err := h.onPublish(streamKey, h.resourceId)
 		if err != nil {
 			return err
 		}
 		h.params = params
 
-		if statsGatherer == nil {
-			statsGatherer = stats.NewLocalMediaStatsGatherer()
-		}
-
-		h.trackStats[types.Audio] = statsGatherer.RegisterTrackStats(stats.InputAudio)
-		h.trackStats[types.Video] = statsGatherer.RegisterTrackStats(stats.InputVideo)
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -348,6 +366,10 @@ func (h *RTMPHandler) OnClose() {
 	if h.onClose != nil {
 		h.onClose(h.resourceId)
 	}
+}
+
+func (h *RTMPHandler) SetWriter(w io.WriteCloser) error {
+	return h.mediaBuffer.SetWriter(w)
 }
 
 func (h *RTMPHandler) Close() {

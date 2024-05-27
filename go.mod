@@ -71,7 +71,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.6 // indirect
 	github.com/lithammer/shortuuid/v4 v4.0.0 // indirect
 	github.com/livekit/mageutil v0.0.0-20230125210925-54e8a70427c1 // indirect
-	github.com/livekit/psrpc v0.5.3-0.20240403150641-811331b106d9 // indirect
+	github.com/livekit/psrpc v0.5.3-0.20240403150641-811331b106d9
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/nats-io/nats.go v1.31.0 // indirect
 	github.com/nats-io/nkeys v0.4.7 // indirect
