@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"os"
 
 	"github.com/livekit/protocol/logger"
@@ -23,24 +22,19 @@ type Config struct {
 }
 
 type ServiceConfig struct {
-	Redis     *redis.RedisConfig `yaml:"redis"`      // required
-	ApiKey    string             `yaml:"api_key"`    // required (env LIVEKIT_API_KEY)
-	ApiSecret string             `yaml:"api_secret"` // required (env LIVEKIT_API_SECRET)
-	WsUrl     string             `yaml:"ws_url"`     // required (env LIVEKIT_WS_URL)
+	Redis *redis.RedisConfig `yaml:"redis"`
 
-	HealthPort       int           `yaml:"health_port"`
+	HttpPort         int           `yaml:"http_port"`
 	DebugHandlerPort int           `yaml:"debug_handler_port"`
-	PrometheusPort   int           `yaml:"prometheus_port"`
-	RTMPPort         int           `yaml:"rtmp_port"` // -1 to disable RTMP
+	RTMPPort         int           `yaml:"rtmp_port"`
 	HTTPRelayPort    int           `yaml:"http_relay_port"`
 	Logging          logger.Config `yaml:"logging"`
 	Development      bool          `yaml:"development"`
 }
 
 type InternalConfig struct {
-	// internal
 	ServiceName string `yaml:"service_name"`
-	NodeID      string `yaml:"node_id"` // Do not provide, will be overwritten
+	NodeID      string `yaml:"node_id"`
 }
 
 type LoggingConfig struct {
@@ -62,10 +56,6 @@ func (conf *Config) Init() error {
 	err := conf.InitDefaults()
 	if err != nil {
 		return err
-	}
-
-	if conf.InternalConfig == nil {
-		return errors.New("InternalConfig is nil")
 	}
 
 	if err := conf.InitLogger(); err != nil {
@@ -117,10 +107,8 @@ func LoadFromFile(filePath string) (*Config, error) {
 		return nil, err
 	}
 
-	// Initialize the InternalConfig field
 	conf.InternalConfig = &InternalConfig{}
 
-	// Initialize the configuration
 	if err := conf.Init(); err != nil {
 		return nil, err
 	}

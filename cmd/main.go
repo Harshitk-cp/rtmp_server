@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 
@@ -27,13 +28,13 @@ func init() {
 
 func main() {
 
-	portString := os.Getenv("PORT")
 	router := setupRouter()
 
 	conf, err := loadConfig()
 	if err != nil {
 		logrus.Fatalf("Failed to load configuration: %v", err)
 	}
+	port := conf.HttpPort
 
 	gst.Init(nil)
 
@@ -47,7 +48,7 @@ func main() {
 		logrus.Fatalf("Failed to start relay server: %v", err)
 	}
 
-	servErr := startHTTPServer(router, portString)
+	servErr := startHTTPServer(router, fmt.Sprintf(":%d", port))
 	if servErr != nil {
 		logrus.Fatal(servErr)
 	}
@@ -77,7 +78,7 @@ func setupRouter() *chi.Mux {
 func startHTTPServer(router *chi.Mux, port string) error {
 	srv := &http.Server{
 		Handler: router,
-		Addr:    ":" + port,
+		Addr:    port,
 	}
 	logrus.Infof("Server starting on port %v", port)
 

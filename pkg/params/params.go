@@ -107,10 +107,8 @@ func GetParams(ctx context.Context, psrpcClient rpc.IOInfoClient, conf *config.C
 	UpdateTranscodingEnabled(infoCopy)
 
 	if token == "" {
-		token, err = ingress.BuildIngressToken(conf.ApiKey, conf.ApiSecret, info.RoomName, info.ParticipantIdentity, info.ParticipantName, info.ParticipantMetadata)
-		if err != nil {
-			return nil, err
-		}
+		logrus.Info(relayToken)
+		//TODO - create new token
 	}
 
 	p := &Params{

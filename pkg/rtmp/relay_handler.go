@@ -8,7 +8,7 @@ import (
 
 	"github.com/livekit/protocol/logger"
 	"github.com/livekit/psrpc"
-	"github.com/sirupsen/logrus"
+
 	log "github.com/sirupsen/logrus"
 )
 
@@ -23,10 +23,8 @@ func NewRTMPRelayHandler(rtmpServer *RTMPServer) *RTMPRelayHandler {
 }
 
 func (h *RTMPRelayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Error("SPET 1")
 	var err error
 	defer func() {
-		log.Error("SPET 2")
 		var psrpcErr psrpc.Error
 		switch {
 		case errors.As(err, &psrpcErr):
@@ -38,9 +36,8 @@ func (h *RTMPRelayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	resourceId := strings.TrimLeft(r.URL.Path, "/rtmp/")
+	resourceId := strings.TrimPrefix(r.URL.Path, "/rtmp/")
 	log := logger.Logger(logger.GetLogger().WithValues("resourceID", resourceId))
-	log.Infow("relaying ingress")
 
 	pr, pw := io.Pipe()
 	defer pw.Close()
@@ -54,19 +51,20 @@ func (h *RTMPRelayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	err = h.rtmpServer.AssociateRelay(resourceId, pw)
 	if err != nil {
-		logrus.Errorf("Failed to associate relay: %v", err)
+		log.Errorw("Failed to associate relay: %v", err)
 		return
 	}
 	defer h.rtmpServer.DissociateRelay(resourceId)
 
-	notify := w.(http.CloseNotifier).CloseNotify()
+	ctx := r.Context()
 	select {
-	case <-notify:
-		logrus.Infof("Client closed the connection")
+	case <-ctx.Done():
+		log.Infow("Client closed the connection")
+		err = ctx.Err()
 		return
 	case err = <-done:
 		if err != nil {
-			logrus.Errorf("Error copying data: %v", err)
+			log.Errorw("Error copying data: %v", err)
 		}
 	}
 }

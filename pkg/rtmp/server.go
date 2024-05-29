@@ -8,19 +8,19 @@ import (
 	"path"
 	"sync"
 
-	"github.com/Harshitk-cp/rtmp_server/pkg/config"
-	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
-	"github.com/Harshitk-cp/rtmp_server/pkg/params"
-	"github.com/Harshitk-cp/rtmp_server/pkg/utils"
 	"github.com/frostbyte73/core"
 	"github.com/livekit/protocol/logger"
 	protoutils "github.com/livekit/protocol/utils"
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	"github.com/yutopp/go-flv"
 	flvtag "github.com/yutopp/go-flv/tag"
 	"github.com/yutopp/go-rtmp"
 	rtmpmsg "github.com/yutopp/go-rtmp/message"
+
+	"github.com/Harshitk-cp/rtmp_server/pkg/config"
+	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
+	"github.com/Harshitk-cp/rtmp_server/pkg/params"
+	"github.com/Harshitk-cp/rtmp_server/pkg/utils"
 )
 
 type RTMPServer struct {
@@ -54,7 +54,7 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 			}
 			lf := l.WithFields(conf.GetLoggerFields())
 
-			logrus.WithFields(logrus.Fields{
+			log.WithFields(log.Fields{
 				"remoteAddr": conn.RemoteAddr(),
 			}).Info("Client connected")
 
@@ -72,7 +72,7 @@ func (s *RTMPServer) Start(conf *config.Config, onPublish func(streamKey, resour
 				s.handlers.Store(resourceId, h)
 
 				go func() {
-					err := h.RelayStream("rtmp://localhost:9090/live", streamKey)
+					err := h.RelayStream(h.RelayUrl, streamKey)
 					if err != nil {
 						log.Printf("Failed to relay stream: %v", err)
 					}
@@ -206,7 +206,7 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 
 	}
 
-	logrus.WithFields(logrus.Fields{
+	log.WithFields(log.Fields{
 		"appName":        appName,
 		"streamKey":      streamKey,
 		"resourceID":     h.resourceId,
@@ -244,12 +244,6 @@ func (h *RTMPHandler) RelayStream(rtmpURL, streamKey string) error {
 	var timestamp uint32
 	for {
 		var flvTag flvtag.FlvTag
-		// if err := h.flvEnc.Decode(&flvTag); err != nil {
-		// 	if err == io.EOF {
-		// 		break
-		// 	}
-		// 	return err
-		// }
 
 		var msg rtmpmsg.Message
 		switch flvTag.TagType {
@@ -309,7 +303,7 @@ func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
 	if err := flvtag.DecodeAudioData(payload, &audio); err != nil {
 		return err
 	}
-	// Ensure data is read correctly
+
 	audioBuffer := new(bytes.Buffer)
 	if _, err := io.Copy(audioBuffer, audio.Data); err != nil {
 		return err
@@ -337,15 +331,6 @@ func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
 		return err
 	}
 	video.Data = flvBody
-
-	// log.Printf("FLV Video Data: Timestamp = %d, FrameType = %+v, CodecID = %+v, AVCPacketType = %+v, CT = %+v, Data length = %+v",
-	// 	timestamp,
-	// 	video.FrameType,
-	// 	video.CodecID,
-	// 	video.AVCPacketType,
-	// 	video.CompositionTime,
-	// 	len(flvBody.Bytes()),
-	// )
 
 	if err := h.flvEnc.Encode(&flvtag.FlvTag{
 		TagType:   flvtag.TagTypeVideo,
