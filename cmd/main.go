@@ -27,7 +27,6 @@ func init() {
 }
 
 func main() {
-
 	router := setupRouter()
 
 	conf, err := loadConfig()
@@ -39,11 +38,11 @@ func main() {
 	gst.Init(nil)
 
 	rtmpServer := rtmp.NewRTMPServer()
-	relay := service.NewRelay(rtmpServer)
+	relay := service.NewRelay(rtmpServer, router)
 
 	go startRTMPServer(rtmpServer, conf)
 
-	err = relay.Start(conf)
+	err = relay.Start()
 	if err != nil {
 		logrus.Fatalf("Failed to start relay server: %v", err)
 	}
@@ -52,7 +51,6 @@ func main() {
 	if servErr != nil {
 		logrus.Fatal(servErr)
 	}
-
 }
 
 func setupRouter() *chi.Mux {
