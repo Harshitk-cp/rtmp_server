@@ -65,8 +65,9 @@ func setupRouter() *chi.Mux {
 	}))
 
 	v1Router := chi.NewRouter()
-	v1Router.Get("/health", handlers.HandleReadiness)
+	v1Router.Post("/health", handlers.HandleReadiness)
 	v1Router.Get("/error", handlers.HandleErr)
+	v1Router.Post("/offer", handlers.HandleOffer)
 	v1Router.Get("/ws/{roomID}", handlers.HandleWebSocket)
 
 	router.Mount("/v1", v1Router)

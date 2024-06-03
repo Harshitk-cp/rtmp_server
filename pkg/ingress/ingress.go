@@ -44,13 +44,14 @@ func (i *Ingress) Start() error {
 	go func() {
 		err := i.transcoder.Start(i.rtmpServer, i.participant.ID)
 		if err != nil {
-			logrus.Printf("Failed to start transcoder: %v", err)
+			logrus.Errorf("Failed to start transcoder: %v", err)
 		}
 	}()
+
 	go func() {
-		err := i.webrtcSignal.Start(i.participant)
+		_, err := i.webrtcSignal.Start(i.participant, "")
 		if err != nil {
-			logrus.Printf("Failed to start WebRTC signaling: %v", err)
+			logrus.Errorf("Failed to start WebRTC signaling: %v", err)
 		}
 	}()
 
