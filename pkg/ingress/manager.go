@@ -1,6 +1,7 @@
 package ingress
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
@@ -10,24 +11,26 @@ import (
 
 type IngressManager struct {
 	config     *config.Config
-	rtmpServer *rtmp.RTMPServer
+	sfuServer  *rtmp.SFUServer
 	ingressMap sync.Map
 }
 
-func NewIngressManager(config *config.Config, rtmpServer *rtmp.RTMPServer) *IngressManager {
+func NewIngressManager(config *config.Config, sfuServer *rtmp.SFUServer) *IngressManager {
 	return &IngressManager{
-		config:     config,
-		rtmpServer: rtmpServer,
+		config:    config,
+		sfuServer: sfuServer,
 	}
 }
 
-func (m *IngressManager) CreateIngress(streamKey string, r *room.Room, participant *room.Participant) (*Ingress, error) {
-
+func (m *IngressManager) CreateIngress(streamKey string, r *room.Room) (*Ingress, error) {
 	if ingress, ok := m.ingressMap.Load(streamKey); ok {
 		return ingress.(*Ingress), nil
 	}
 
-	ingress := NewIngress(m.config, m.rtmpServer, streamKey, r, participant)
+	ingress := NewIngress(m.config, m.sfuServer, streamKey, r)
+	if ingress == nil {
+		return nil, fmt.Errorf("failed to create ingress for stream key: %s", streamKey)
+	}
 
 	m.ingressMap.Store(streamKey, ingress)
 

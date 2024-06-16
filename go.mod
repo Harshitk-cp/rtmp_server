@@ -3,7 +3,6 @@ module github.com/Harshitk-cp/rtmp_server
 go 1.22.2
 
 require (
-	github.com/frostbyte73/core v0.0.10
 	github.com/go-chi/chi/v5 v5.0.12
 	github.com/go-chi/cors v1.2.1
 	github.com/gorilla/websocket v1.5.1
@@ -17,8 +16,7 @@ require (
 )
 
 require (
-	github.com/go-gst/go-glib v1.0.0 // indirect
-	github.com/mattn/go-pointer v0.0.1 // indirect
+	github.com/frostbyte73/core v0.0.10 // indirect
 	github.com/prometheus/client_golang v1.19.0 // indirect
 )
 
@@ -41,7 +39,7 @@ require (
 	github.com/pion/logging v0.2.2 // indirect
 	github.com/pion/mdns v0.0.12 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtp v1.8.5 // indirect
+	github.com/pion/rtp v1.8.5
 	github.com/pion/sctp v1.8.16 // indirect
 	github.com/pion/sdp/v3 v3.0.9 // indirect
 	github.com/pion/srtp/v2 v2.0.18 // indirect
@@ -61,7 +59,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/gammazero/deque v0.2.1 // indirect
-	github.com/go-gst/go-gst v1.0.0
 	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect

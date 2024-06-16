@@ -28,4 +28,5 @@ var (
 	ErrParticipantExists            = errors.New("participants exist")
 	ErrParticipantNotFound          = errors.New("participant not found")
 	ErrStreamNotFound               = errors.New("stream not found")
+	ErrWebRTCSignalingNotFound      = errors.New("webrtc signaling not found")
 )
