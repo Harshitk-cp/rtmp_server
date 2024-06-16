@@ -7,6 +7,7 @@ import (
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/room"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
+	"github.com/pion/webrtc/v3"
 
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
@@ -56,12 +57,22 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 			return
 		}
 
-		go sfuServer.SendRTMPToWebRTC(participant)
-
 		defer func() {
 			rm.RemoveParticipant(clientID)
 			logrus.Infof("Participant %s removed from room %s", clientID, roomID)
 		}()
+
+		if !exist {
+
+			err = rm.CreateAndBroadcastOffer()
+			if err != nil {
+				logrus.Errorf("Error creating and broadcasting offer: %v", err)
+				http.Error(w, "Failed to create and broadcast offer", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		go sfuServer.SendRTMPToWebRTC(participant)
 
 		for {
 			_, msg, err := conn.ReadMessage()
@@ -80,11 +91,26 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 
 			switch signal.Type {
 			case "offer":
-				handleOffer(rm, participant, signal.Data, signal.FromClientID)
+				handleOffer(rm, participant, signal.Data, sfuServer, signal.FromClientID)
 			case "answer":
 				handleAnswer(rm, signal.FromClientID, signal.Data)
 			case "candidate":
-				handleCandidate(rm, signal.Data, signal.FromClientID)
+				if signal.FromClientID == "server" {
+					room, exist := roomManager.GetRoom(roomID)
+					if !exist {
+						logrus.Errorf("No room found with ID: %v", roomID)
+					}
+					err := room.ServerPeer.PeerConnection.AddICECandidate(webrtc.ICECandidateInit{
+						Candidate: signal.Data,
+						// SDPMid:        *sdpMid,
+						// SDPMLineIndex: sdpMLineIndex,
+					})
+					if err != nil {
+						logrus.Errorf("Error adding ICE candidate: %v", err)
+					}
+				} else {
+					sfuServer.HandleCandidate(participant, signal.Data)
+				}
 			default:
 				logrus.Warnf("Unknown message type: %v", signal.Type)
 			}
@@ -92,14 +118,15 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 	}
 }
 
-func handleOffer(rm *room.Room, participant *room.Participant, offer, fromClientId string) {
-	rm.Broadcast(participant.ID, "getOffer", offer, fromClientId)
+func handleOffer(rm *room.Room, participant *room.Participant, offer string, sfu *rtmp.SFUServer, fromClientId string) {
+	answer := sfu.HandleOffer(participant, offer, rm)
+	if answer == "" {
+		logrus.Error("Failed to create answer")
+		return
+	}
+	rm.SendToParticipant(participant.ID, "getAnswer", answer, fromClientId)
 }
 
 func handleAnswer(rm *room.Room, fromClientID, answer string) {
-	rm.SendToParticipant(fromClientID, "getAnswer", answer)
-}
-
-func handleCandidate(rm *room.Room, candidate, fromClientId string) {
-	rm.Broadcast("", "getCandidate", candidate, fromClientId)
+	rm.HandleAnswer(fromClientID, answer)
 }

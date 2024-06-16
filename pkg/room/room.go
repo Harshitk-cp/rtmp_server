@@ -1,27 +1,31 @@
 package room
 
 import (
+	"encoding/json"
 	"sync"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
+
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v3"
 	"github.com/sirupsen/logrus"
 )
 
 type Participant struct {
-	ID         string
-	Conn       *websocket.Conn
-	PeerConn   *webrtc.PeerConnection
-	VideoTrack *webrtc.TrackLocalStaticRTP
-	AudioTrack *webrtc.TrackLocalStaticRTP
-	mutex      sync.RWMutex
+	ID             string
+	Conn           *websocket.Conn
+	PeerConnection *webrtc.PeerConnection
+	mutex          sync.RWMutex
+	VideoTrack     *webrtc.TrackLocalStaticRTP
+	AudioTrack     *webrtc.TrackLocalStaticRTP
 }
 
 type Room struct {
-	ID           string
-	Participants map[string]*Participant
-	mutex        sync.RWMutex
+	ID              string
+	Participants    map[string]*Participant
+	ServerPeer      *Participant
+	ServerPeerMutex sync.RWMutex
+	mutex           sync.RWMutex
 }
 
 func NewRoom(id string) *Room {
@@ -50,9 +54,8 @@ func (r *Room) CreateParticipant(id string, conn *websocket.Conn) (*Participant,
 	}
 
 	participant := &Participant{
-		ID:   id,
-		Conn: conn,
-		// PeerConn:   peerConn,
+		ID:         id,
+		Conn:       conn,
 		VideoTrack: videoTrack,
 		AudioTrack: audioTrack,
 	}
@@ -72,9 +75,6 @@ func (r *Room) RemoveParticipant(id string) error {
 
 	delete(r.Participants, id)
 	participant.Conn.Close()
-	if participant.PeerConn != nil {
-		participant.PeerConn.Close()
-	}
 	return nil
 }
 
@@ -105,7 +105,7 @@ func (r *Room) Broadcast(senderID, msgType, data, fromClientID string) {
 	}
 }
 
-func (r *Room) SendToParticipant(participantID, msgType, data string) {
+func (r *Room) SendToParticipant(participantID, msgType, data, fromClientID string) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
@@ -116,8 +116,9 @@ func (r *Room) SendToParticipant(participantID, msgType, data string) {
 	}
 
 	message := SignalMessage{
-		Type: msgType,
-		Data: data,
+		Type:         msgType,
+		Data:         data,
+		FromClientID: fromClientID,
 	}
 	participant.mutex.Lock()
 	err := participant.Conn.WriteJSON(message)
@@ -125,4 +126,88 @@ func (r *Room) SendToParticipant(participantID, msgType, data string) {
 	if err != nil {
 		logrus.Errorf("Error sending message to participant %s: %v", participantID, err)
 	}
+}
+
+func (r *Room) CreateAndBroadcastOffer() error {
+	r.ServerPeerMutex.Lock()
+	defer r.ServerPeerMutex.Unlock()
+
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		logrus.Errorf("Error creating PeerConnection: %v", err)
+		return err
+	}
+
+	videoTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", "pion")
+	if err != nil {
+		return err
+	}
+	audioTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, "audio", "pion")
+	if err != nil {
+		return err
+	}
+
+	_, err = pc.AddTrack(videoTrack)
+	if err != nil {
+		return err
+	}
+	_, err = pc.AddTrack(audioTrack)
+	if err != nil {
+		return err
+	}
+
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		logrus.Errorf("Error creating offer: %v", err)
+		return err
+	}
+
+	err = pc.SetLocalDescription(offer)
+	if err != nil {
+		logrus.Errorf("Error setting local description: %v", err)
+		return err
+	}
+
+	r.ServerPeer = &Participant{
+		ID:             "server",
+		PeerConnection: pc,
+		VideoTrack:     videoTrack,
+		AudioTrack:     audioTrack,
+	}
+
+	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return
+		}
+		candidateJSON, err := json.Marshal(candidate.ToJSON())
+		if err != nil {
+			logrus.Errorf("Error marshaling ICE candidate: %v", err)
+			return
+		}
+		r.Broadcast("server", "getCandidate", string(candidateJSON), "server")
+	})
+
+	r.Broadcast("server", "getOffer", offer.SDP, "server")
+	return nil
+}
+
+func (r *Room) HandleAnswer(fromClientID, answer string) error {
+	r.ServerPeerMutex.RLock()
+	defer r.ServerPeerMutex.RUnlock()
+
+	if r.ServerPeer == nil || r.ServerPeer.PeerConnection == nil {
+		logrus.Error("Server peer connection not found")
+		return errors.ErrPeerConnectionNotFound
+	}
+
+	answerSDP := webrtc.SessionDescription{
+		Type: webrtc.SDPTypeAnswer,
+		SDP:  answer,
+	}
+	err := r.ServerPeer.PeerConnection.SetRemoteDescription(answerSDP)
+	if err != nil {
+		logrus.Errorf("Error setting remote description: %v", err)
+		return err
+	}
+	return nil
 }

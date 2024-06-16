@@ -9,7 +9,6 @@ import (
 
 	"github.com/livekit/protocol/logger"
 	protoutils "github.com/livekit/protocol/utils"
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	flvtag "github.com/yutopp/go-flv/tag"
 	"github.com/yutopp/go-rtmp"
@@ -52,7 +51,7 @@ func (s *RTMPServer) Start(conf *config.Config, h *RTMPHandler, onPublish func(s
 
 	srv := rtmp.NewServer(&rtmp.ServerConfig{
 		OnConnect: func(conn net.Conn) (io.ReadWriteCloser, *rtmp.ConnConfig) {
-			l := logrus.StandardLogger()
+			l := log.StandardLogger()
 
 			s.handlers[h.resourceId] = h
 
@@ -76,7 +75,8 @@ func (s *RTMPServer) Start(conf *config.Config, h *RTMPHandler, onPublish func(s
 func (s *RTMPServer) CloseHandler(resourceId string) {
 	h, ok := s.handlers[resourceId]
 	if ok && h != nil {
-
+		// Clean up resources if needed
+		delete(s.handlers, resourceId)
 	}
 }
 
@@ -98,8 +98,6 @@ type RTMPHandler struct {
 	onClose   func(resourceId string)
 
 	pc           *webrtc.PeerConnection
-	videoTrack   *webrtc.TrackLocalStaticRTP
-	audioTrack   *webrtc.TrackLocalStaticRTP
 	videoRTPChan chan *rtp.Packet
 	audioRTPChan chan *rtp.Packet
 }
@@ -145,59 +143,7 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 
 	h.log.Infow("Received a new published stream")
 
-	err := h.initWebRTC()
-	if err != nil {
-		return err
-	}
-
 	return nil
-}
-
-func (h *RTMPHandler) initWebRTC() error {
-	var err error
-	h.pc, err = webrtc.NewPeerConnection(webrtc.Configuration{})
-	if err != nil {
-		return err
-	}
-
-	h.videoTrack, err = webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", "pion")
-	if err != nil {
-		return err
-	}
-
-	h.audioTrack, err = webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, "audio", "pion")
-	if err != nil {
-		return err
-	}
-
-	_, err = h.pc.AddTrack(h.videoTrack)
-	if err != nil {
-		return err
-	}
-
-	_, err = h.pc.AddTrack(h.audioTrack)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (h *RTMPHandler) ReceiveRTMPStream() (*webrtc.TrackLocalStaticRTP, *webrtc.TrackLocalStaticRTP, error) {
-	videoTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", "pion")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	audioTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, "audio", "pion")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	h.videoTrack = videoTrack
-	h.audioTrack = audioTrack
-
-	return videoTrack, audioTrack, nil
 }
 
 func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
@@ -238,44 +184,12 @@ func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
 	rtpPacket := &rtp.Packet{}
 	err := rtpPacket.Unmarshal(videoBuffer.Bytes())
 	if err != nil {
-		logrus.Errorf("Failed to unmarshal video data into RTP packet: %v", err)
+		log.Errorf("Failed to unmarshal video data into RTP packet: %v", err)
 		return err
 	}
 
 	h.videoRTPChan <- rtpPacket
 	return nil
-}
-
-func (h *RTMPHandler) sendAudioToWebRTC(data []byte) {
-
-	rtpPacket := &rtp.Packet{}
-
-	err := rtpPacket.Unmarshal(data)
-	if err != nil {
-		log.Error("Failed to unmarshal data into RTP packet: ", err)
-		return
-	}
-
-	err = h.audioTrack.WriteRTP(rtpPacket)
-	if err != nil {
-		log.Error("Failed to write RTP packet to audio track: ", err)
-	}
-}
-
-func (h *RTMPHandler) sendVideoToWebRTC(data []byte) {
-
-	rtpPacket := &rtp.Packet{}
-
-	err := rtpPacket.Unmarshal(data)
-	if err != nil {
-		log.Error("Failed to unmarshal data into RTP packet: ", err)
-		return
-	}
-
-	err = h.videoTrack.WriteRTP(rtpPacket)
-	if err != nil {
-		log.Error("Failed to write RTP packet to video track: ", err)
-	}
 }
 
 func (h *RTMPHandler) OnClose() {

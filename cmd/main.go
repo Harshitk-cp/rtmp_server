@@ -80,7 +80,13 @@ func startRTMPServer(rtmpServer *rtmp.RTMPServer, sfuServer *rtmp.SFUServer, con
 		r, exists := rm.GetRoom(streamKey)
 		if !exists {
 			r = rm.CreateRoom(streamKey)
+			err := r.CreateAndBroadcastOffer()
+			if err != nil {
+				logrus.Errorf("Error creating and broadcasting offer: %v", err)
+
+			}
 		}
+
 		logrus.Infof("Stream key: %v", streamKey)
 
 		ingressManager := ingress.NewIngressManager(conf, sfuServer)
