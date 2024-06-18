@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/yutopp/go-flv/tag"
 )
 
 const (
@@ -13,16 +15,17 @@ const (
 )
 
 type PrerollBuffer struct {
-	lock   sync.Mutex
-	buffer *bytes.Buffer
-	w      io.WriteCloser
-
+	lock          sync.Mutex
+	buffer        *bytes.Buffer
+	w             io.WriteCloser
+	tagChannel    chan *tag.FlvTag
 	onBufferReset func() error
 }
 
 func NewPrerollBuffer(onBufferReset func() error) *PrerollBuffer {
 	return &PrerollBuffer{
 		buffer:        &bytes.Buffer{},
+		tagChannel:    make(chan *tag.FlvTag, 100),
 		onBufferReset: onBufferReset,
 	}
 }
@@ -65,19 +68,6 @@ func (pb *PrerollBuffer) Write(p []byte) (int, error) {
 		return pb.buffer.Write(p)
 	}
 
-	// if pb.w == nil {
-	// 	if len(p)+pb.buffer.Len() > maxBufferSize {
-	// 		pb.buffer.Reset()
-	// 		if pb.onBufferReset != nil {
-	// 			if err := pb.onBufferReset(); err != nil {
-	// 				return 0, err
-	// 			}
-	// 		}
-	// 		return 0, errors.ErrPrerollBufferReset
-	// 	}
-	// 	return pb.buffer.Write(p)
-	// }
-
 	n, err := pb.w.Write(p)
 	if err == io.ErrClosedPipe {
 		err = nil
@@ -101,6 +91,14 @@ func (pb *PrerollBuffer) Read(p []byte) (int, error) {
 	defer pb.lock.Unlock()
 
 	return pb.buffer.Read(p)
+}
+
+func (pb *PrerollBuffer) AddTag(tag *tag.FlvTag) {
+	pb.tagChannel <- tag
+}
+
+func (pb *PrerollBuffer) GetTags() <-chan *tag.FlvTag {
+	return pb.tagChannel
 }
 
 func NewGuid(prefix string) string {

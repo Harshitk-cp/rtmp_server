@@ -28,4 +28,8 @@ var (
 	ErrParticipantExists            = errors.New("participants exist")
 	ErrParticipantNotFound          = errors.New("participant not found")
 	ErrStreamNotFound               = errors.New("stream not found")
+	ErrWebRTCSignalingNotFound      = errors.New("webrtc signaling not found")
+	ErrConvertRtmpToWebrtc          = errors.New("could not convert rtmp to webrtc")
+	ErrPeerConnectionNotFound       = errors.New("peer connection not found")
+	ErrServerPeerNotInitialized     = errors.New("server peer not initialized")
 )

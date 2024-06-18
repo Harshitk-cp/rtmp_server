@@ -49,12 +49,12 @@ func (h *RTMPRelayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		close(done)
 	}()
 
-	err = h.rtmpServer.AssociateRelay(resourceId, pw)
-	if err != nil {
-		log.Errorw("Failed to associate relay: %v", err)
-		return
-	}
-	defer h.rtmpServer.DissociateRelay(resourceId)
+	// err = h.rtmpServer.AssociateRelay(resourceId, pw)
+	// if err != nil {
+	// 	log.Errorw("Failed to associate relay: %v", err)
+	// 	return
+	// }
+	// defer h.rtmpServer.DissociateRelay(resourceId)
 
 	ctx := r.Context()
 	select {
