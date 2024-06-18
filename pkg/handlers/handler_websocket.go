@@ -7,9 +7,8 @@ import (
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/room"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
-	"github.com/pion/webrtc/v3"
-
 	"github.com/gorilla/websocket"
+	"github.com/pion/webrtc/v3"
 	"github.com/sirupsen/logrus"
 )
 
@@ -22,9 +21,7 @@ var upgrader = websocket.Upgrader{
 type SignalMessage struct {
 	Type         string `json:"type"`
 	Data         string `json:"data"`
-	ClientID     string `json:"clientID"`
 	FromClientID string `json:"fromClientID"`
-	RoomID       string `json:"roomID"`
 }
 
 func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) http.HandlerFunc {
@@ -50,29 +47,53 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 			rm = roomManager.CreateRoom(roomID)
 		}
 
-		participant, err := rm.CreateParticipant(clientID, conn)
+		pc, err := webrtc.NewPeerConnection(webrtc.Configuration{
+			ICEServers: []webrtc.ICEServer{
+				{
+					URLs: []string{"stun:stun.l.google.com:19302"},
+				},
+			},
+		})
+		if err != nil {
+			logrus.Errorf("Error creating PeerConnection: %v", err)
+			http.Error(w, "Failed to create PeerConnection", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = pc.AddTrack(rm.StreamingTracks.VideoTrack)
+		if err != nil {
+			logrus.Errorf("Error adding video track: %v", err)
+			http.Error(w, "Failed to add video track", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = pc.AddTrack(rm.StreamingTracks.AudioTrack)
+		if err != nil {
+			logrus.Errorf("Error adding audio track: %v", err)
+			http.Error(w, "Failed to add audio track", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = rm.CreateParticipant(clientID, conn)
 		if err != nil {
 			logrus.Errorf("Error creating participant: %v", err)
 			http.Error(w, "Failed to create participant", http.StatusInternalServerError)
 			return
 		}
 
+		rm.ClientPeerConnections[clientID] = pc
+
 		defer func() {
 			rm.RemoveParticipant(clientID)
 			logrus.Infof("Participant %s removed from room %s", clientID, roomID)
 		}()
 
-		if !exist {
-
-			err = rm.CreateAndBroadcastOffer()
-			if err != nil {
-				logrus.Errorf("Error creating and broadcasting offer: %v", err)
-				http.Error(w, "Failed to create and broadcast offer", http.StatusInternalServerError)
-				return
-			}
+		err = rm.GenerateOffer(clientID)
+		if err != nil {
+			logrus.Errorf("Error generating offer: %v", err)
 		}
 
-		go sfuServer.SendRTMPToWebRTC(participant)
+		go sfuServer.SendRTMPToWebRTC(rm, clientID)
 
 		for {
 			_, msg, err := conn.ReadMessage()
@@ -90,27 +111,10 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 			}
 
 			switch signal.Type {
-			case "offer":
-				handleOffer(rm, participant, signal.Data, sfuServer, signal.FromClientID)
 			case "answer":
-				handleAnswer(rm, signal.FromClientID, signal.Data)
+				handleClientAnswer(rm, signal.Data, clientID)
 			case "candidate":
-				if signal.FromClientID == "server" {
-					room, exist := roomManager.GetRoom(roomID)
-					if !exist {
-						logrus.Errorf("No room found with ID: %v", roomID)
-					}
-					err := room.ServerPeer.PeerConnection.AddICECandidate(webrtc.ICECandidateInit{
-						Candidate: signal.Data,
-						// SDPMid:        *sdpMid,
-						// SDPMLineIndex: sdpMLineIndex,
-					})
-					if err != nil {
-						logrus.Errorf("Error adding ICE candidate: %v", err)
-					}
-				} else {
-					sfuServer.HandleCandidate(participant, signal.Data)
-				}
+				handleCandidate(rm, signal.Data, clientID)
 			default:
 				logrus.Warnf("Unknown message type: %v", signal.Type)
 			}
@@ -118,15 +122,21 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 	}
 }
 
-func handleOffer(rm *room.Room, participant *room.Participant, offer string, sfu *rtmp.SFUServer, fromClientId string) {
-	answer := sfu.HandleOffer(participant, offer, rm)
-	if answer == "" {
-		logrus.Error("Failed to create answer")
-		return
-	}
-	rm.SendToParticipant(participant.ID, "getAnswer", answer, fromClientId)
+func handleClientAnswer(rm *room.Room, answer, clientID string) {
+	rm.HandleAnswer(answer, clientID)
 }
 
-func handleAnswer(rm *room.Room, fromClientID, answer string) {
-	rm.HandleAnswer(fromClientID, answer)
+func handleCandidate(rm *room.Room, candidate, clientID string) {
+	pc, ok := rm.ClientPeerConnections[clientID]
+	if !ok {
+		logrus.Errorf("Error peer connection not found for client ID: %v", clientID)
+	}
+
+	err := pc.AddICECandidate(webrtc.ICECandidateInit{
+		Candidate: candidate,
+	})
+	if err != nil {
+		logrus.Errorf("Error adding ICE candidate: %v", err)
+	}
+
 }

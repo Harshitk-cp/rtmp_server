@@ -11,9 +11,6 @@ import (
 type Ingress struct {
 	config      *config.Config
 	sfuServer   *rtmp.SFUServer
-	roomManager *room.RoomManager
-	streamKey   string
-	resourceID  string
 	room        *room.Room
 	participant *room.Participant
 }
@@ -26,11 +23,9 @@ func NewIngress(config *config.Config, sfuServer *rtmp.SFUServer, streamKey stri
 	}
 }
 
-func (i *Ingress) SetParticipant(participant *room.Participant) {
-	i.participant = participant
-}
-
 func (i *Ingress) Start() error {
+	// go i.sfuServer.SendRTMPToWebRTC(i.room.ServerPeer)
+
 	return nil
 }
 

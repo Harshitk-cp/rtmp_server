@@ -2,6 +2,7 @@ package rtmp
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -17,9 +18,6 @@ import (
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
-
-	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v3"
 )
 
 type RTMPServer struct {
@@ -75,7 +73,6 @@ func (s *RTMPServer) Start(conf *config.Config, h *RTMPHandler, onPublish func(s
 func (s *RTMPServer) CloseHandler(resourceId string) {
 	h, ok := s.handlers[resourceId]
 	if ok && h != nil {
-		// Clean up resources if needed
 		delete(s.handlers, resourceId)
 	}
 }
@@ -89,23 +86,19 @@ type RTMPHandler struct {
 
 	params     *params.Params
 	resourceId string
-
-	RelayUrl string
-
-	log logger.Logger
+	log        logger.Logger
 
 	onPublish func(streamKey, resourceId string) (*params.Params, error)
 	onClose   func(resourceId string)
 
-	pc           *webrtc.PeerConnection
-	videoRTPChan chan *rtp.Packet
-	audioRTPChan chan *rtp.Packet
+	videoRTPChan chan []byte
+	audioRTPChan chan []byte
 }
 
 func NewRTMPHandler() *RTMPHandler {
 	return &RTMPHandler{
-		videoRTPChan: make(chan *rtp.Packet),
-		audioRTPChan: make(chan *rtp.Packet),
+		videoRTPChan: make(chan []byte, 100),
+		audioRTPChan: make(chan []byte, 100),
 	}
 }
 
@@ -147,27 +140,21 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 }
 
 func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
-	// var audio flvtag.AudioData
-	// if err := flvtag.DecodeAudioData(payload, &audio); err != nil {
-	// 	return err
-	// }
+	var audio flvtag.AudioData
+	if err := flvtag.DecodeAudioData(payload, &audio); err != nil {
+		return err
+	}
 
-	// audioBuffer := new(bytes.Buffer)
-	// if _, err := io.Copy(audioBuffer, audio.Data); err != nil {
-	// 	return err
-	// }
-	// audio.Data = audioBuffer
+	data := new(bytes.Buffer)
+	if _, err := io.Copy(data, audio.Data); err != nil {
+		return err
+	}
 
-	// rtpPacket := &rtp.Packet{}
-	// err := rtpPacket.Unmarshal(audioBuffer.Bytes())
-	// if err != nil {
-	// 	logrus.Errorf("Failed to unmarshal audio data into RTP packet: %v", err)
-	// 	return err
-	// }
-
-	// h.audioRTPChan <- rtpPacket
+	h.audioRTPChan <- data.Bytes()
 	return nil
 }
+
+const headerLengthField = 4
 
 func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
 	var video flvtag.VideoData
@@ -175,29 +162,32 @@ func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
 		return err
 	}
 
-	videoBuffer := new(bytes.Buffer)
-	if _, err := io.Copy(videoBuffer, video.Data); err != nil {
-		return err
-	}
-	video.Data = videoBuffer
-
-	rtpPacket := &rtp.Packet{}
-	err := rtpPacket.Unmarshal(videoBuffer.Bytes())
-	if err != nil {
-		log.Errorf("Failed to unmarshal video data into RTP packet: %v", err)
+	data := new(bytes.Buffer)
+	if _, err := io.Copy(data, video.Data); err != nil {
 		return err
 	}
 
-	h.videoRTPChan <- rtpPacket
+	outBuf := []byte{}
+	videoBuffer := data.Bytes()
+	for offset := 0; offset < len(videoBuffer); {
+		bufferLength := int(binary.BigEndian.Uint32(videoBuffer[offset : offset+headerLengthField]))
+		if offset+bufferLength >= len(videoBuffer) {
+			break
+		}
+
+		offset += headerLengthField
+		outBuf = append(outBuf, []byte{0x00, 0x00, 0x00, 0x01}...)
+		outBuf = append(outBuf, videoBuffer[offset:offset+bufferLength]...)
+
+		offset += int(bufferLength)
+	}
+
+	h.videoRTPChan <- outBuf
 	return nil
 }
 
 func (h *RTMPHandler) OnClose() {
 	h.log.Infow("closing ingress RTMP session")
-
-	if h.pc != nil {
-		h.pc.Close()
-	}
 
 	if h.onClose != nil {
 		h.onClose(h.resourceId)
