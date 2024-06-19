@@ -11,6 +11,7 @@ import (
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
 	"github.com/Harshitk-cp/rtmp_server/pkg/room"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
+	"github.com/Harshitk-cp/rtmp_server/pkg/service"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -36,8 +37,14 @@ func main() {
 	sfuServer := rtmp.NewSFUServer(rm, rtmpHandler)
 	rtmpServer := rtmp.NewRTMPServer(sfuServer)
 
-	go startRTMPServer(rtmpServer, sfuServer, conf, rm, rtmpHandler)
 	router := setupRouter(sfuServer, rm)
+	relay := service.NewRelay(rtmpServer, router)
+
+	err = relay.Start()
+	if err != nil {
+		logrus.Fatalf("Failed to start relay server: %v", err)
+	}
+	go startRTMPServer(rtmpServer, sfuServer, conf, rm, rtmpHandler)
 
 	servErr := startHTTPServer(router, fmt.Sprintf(":%d", port))
 	if servErr != nil {

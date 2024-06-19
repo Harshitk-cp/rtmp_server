@@ -1,8 +1,6 @@
 package room
 
 import (
-	"encoding/json"
-	"io"
 	"sync"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
@@ -63,13 +61,13 @@ type StreamingTracks struct {
 }
 
 func NewStreamingTracks() (*StreamingTracks, error) {
-	videoTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000}, "video", "pion")
+	videoTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "video", "pion")
 	if err != nil {
 		logrus.Errorf("Error creating video track: %v", err)
 
 	}
 
-	audioTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000}, "audio", "pion")
+	audioTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, "audio", "pion")
 	if err != nil {
 		logrus.Errorf("Error creating audio track: %v", err)
 
@@ -161,34 +159,6 @@ func (rm *Room) GenerateOffer(clientID string) error {
 	if !ok {
 		return errors.ErrParticipantNotFound
 	}
-
-	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		buffer := make([]byte, 1500) // Adjust buffer size as needed
-		for {
-			n, _, err := track.Read(buffer)
-			if err != nil {
-				if err == io.EOF {
-					logrus.Infof("Track %s reached EOF", track.ID())
-					break
-				}
-				logrus.Errorf("Error reading track %s: %v", track.ID(), err)
-				continue
-			}
-			logrus.Infof("Track %s data: %v", track.ID(), buffer[:n])
-		}
-	})
-
-	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
-		candidateJSON, err := json.Marshal(candidate.ToJSON())
-		if err != nil {
-			logrus.Errorf("Error marshaling ICE candidate: %v", err)
-			return
-		}
-		rm.Broadcast("server", "getCandidate", string(candidateJSON), "server")
-	})
 
 	message := SignalMessage{
 		Type:         "getOffer",

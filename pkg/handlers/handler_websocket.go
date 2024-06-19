@@ -8,6 +8,7 @@ import (
 	"github.com/Harshitk-cp/rtmp_server/pkg/room"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
 	"github.com/gorilla/websocket"
+	"github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v3"
 	"github.com/sirupsen/logrus"
 )
@@ -60,19 +61,42 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 			return
 		}
 
-		_, err = pc.AddTrack(rm.StreamingTracks.VideoTrack)
+		rtpSender, err := pc.AddTrack(rm.StreamingTracks.VideoTrack)
 		if err != nil {
 			logrus.Errorf("Error adding video track: %v", err)
 			http.Error(w, "Failed to add video track", http.StatusInternalServerError)
 			return
 		}
 
-		_, err = pc.AddTrack(rm.StreamingTracks.AudioTrack)
+		processRTCP(rtpSender)
+
+		rtpSender, err = pc.AddTrack(rm.StreamingTracks.AudioTrack)
 		if err != nil {
 			logrus.Errorf("Error adding audio track: %v", err)
 			http.Error(w, "Failed to add audio track", http.StatusInternalServerError)
 			return
 		}
+
+		processRTCP(rtpSender)
+
+		pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+			if candidate == nil {
+				return
+			}
+			candidateJSON, err := json.Marshal(candidate.ToJSON())
+			if err != nil {
+				logrus.Errorf("Error marshaling ICE candidate: %v", err)
+				return
+			}
+			rm.Broadcast("server", "getCandidate", string(candidateJSON), "server")
+			message := SignalMessage{
+				Type:         "candidate",
+				Data:         string(candidateJSON),
+				FromClientID: "server",
+			}
+			logrus.Info(message)
+
+		})
 
 		_, err = rm.CreateParticipant(clientID, conn)
 		if err != nil {
@@ -93,7 +117,11 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 			logrus.Errorf("Error generating offer: %v", err)
 		}
 
-		go sfuServer.SendRTMPToWebRTC(rm, clientID)
+		gatherComplete := webrtc.GatheringCompletePromise(pc)
+
+		<-gatherComplete
+
+		// go sfuServer.SendRTMPToWebRTC(rm, clientID)
 
 		for {
 			_, msg, err := conn.ReadMessage()
@@ -115,6 +143,8 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 				handleClientAnswer(rm, signal.Data, clientID)
 			case "candidate":
 				handleCandidate(rm, signal.Data, clientID)
+			case "startStream":
+				handleStartStream(sfuServer, rm)
 			default:
 				logrus.Warnf("Unknown message type: %v", signal.Type)
 			}
@@ -135,8 +165,28 @@ func handleCandidate(rm *room.Room, candidate, clientID string) {
 	err := pc.AddICECandidate(webrtc.ICECandidateInit{
 		Candidate: candidate,
 	})
+	logrus.Infof("Added candidate: %v", candidate)
 	if err != nil {
 		logrus.Errorf("Error adding ICE candidate: %v", err)
 	}
 
+}
+
+func handleStartStream(sfuServer *rtmp.SFUServer, rm *room.Room) {
+	log.Printf("Starting RTP to Track with %v users", len(rm.Participants))
+	go sfuServer.RtpToTrack(rm.StreamingTracks.VideoTrack, &codecs.VP8Packet{}, 90000, 5007)
+	go sfuServer.RtpToTrack(rm.StreamingTracks.AudioTrack, &codecs.OpusPacket{}, 48000, 5009)
+}
+
+// like NACK this needs to be called.
+func processRTCP(rtpSender *webrtc.RTPSender) {
+	go func() {
+		rtcpBuf := make([]byte, 1500)
+
+		for {
+			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+				return
+			}
+		}
+	}()
 }
