@@ -69,7 +69,7 @@ func NewStreamingTracks() (*StreamingTracks, error) {
 
 	}
 
-	audioTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000}, "audio", "pion")
+	audioTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypePCMA, ClockRate: 48000}, "audio", "pion")
 	if err != nil {
 		logrus.Errorf("Error creating audio track: %v", err)
 
