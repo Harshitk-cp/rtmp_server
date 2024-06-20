@@ -3,17 +3,20 @@ package rtmp
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
 	"path"
 
+	"github.com/Glimesh/go-fdkaac/fdkaac"
 	"github.com/livekit/protocol/logger"
 	protoutils "github.com/livekit/protocol/utils"
 	log "github.com/sirupsen/logrus"
 	flvtag "github.com/yutopp/go-flv/tag"
 	"github.com/yutopp/go-rtmp"
 	rtmpmsg "github.com/yutopp/go-rtmp/message"
+	"gopkg.in/hraban/opus.v2"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
@@ -70,6 +73,12 @@ func (s *RTMPServer) Start(conf *config.Config, h *RTMPHandler, onPublish func(s
 	return nil
 }
 
+func (h *RTMPHandler) OnConnect(timestamp uint32, cmd *rtmpmsg.NetConnectionConnect) error {
+	log.Printf("OnConnect: %#v", cmd)
+	h.audioClockRate = 48000
+	return nil
+}
+
 func (s *RTMPServer) CloseHandler(resourceId string) {
 	h, ok := s.handlers[resourceId]
 	if ok && h != nil {
@@ -93,6 +102,11 @@ type RTMPHandler struct {
 
 	videoRTPChan chan []byte
 	audioRTPChan chan []byte
+
+	audioDecoder   *fdkaac.AacDecoder
+	audioEncoder   *opus.Encoder
+	audioBuffer    []byte
+	audioClockRate uint32
 }
 
 func NewRTMPHandler() *RTMPHandler {
@@ -139,7 +153,29 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 	return nil
 }
 
+func (h *RTMPHandler) SetOpusCtl() {
+	h.audioEncoder.SetMaxBandwidth(opus.Bandwidth(2))
+	h.audioEncoder.SetComplexity(9)
+	h.audioEncoder.SetBitrateToAuto()
+	h.audioEncoder.SetInBandFEC(true)
+}
+
+func (h *RTMPHandler) initAudio() error {
+
+	encoder, err := opus.NewEncoder(48000, 2, opus.AppAudio)
+	if err != nil {
+		println(err.Error())
+		return err
+	}
+	h.audioEncoder = encoder
+	h.SetOpusCtl()
+	h.audioDecoder = fdkaac.NewAacDecoder()
+
+	return nil
+}
+
 func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
+
 	var audio flvtag.AudioData
 	if err := flvtag.DecodeAudioData(payload, &audio); err != nil {
 		return err
@@ -149,8 +185,53 @@ func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
 	if _, err := io.Copy(data, audio.Data); err != nil {
 		return err
 	}
+	if data.Len() <= 0 {
+		log.Println("no audio datas", timestamp, payload)
+		return fmt.Errorf("no audio datas")
+	}
+	datas := data.Bytes()
 
-	h.audioRTPChan <- data.Bytes()
+	if audio.AACPacketType == flvtag.AACPacketTypeSequenceHeader {
+		log.Println("Created new codec ", hex.EncodeToString(datas))
+		err := h.initAudio()
+		if err != nil {
+			log.Println(err, "error initializing Audio")
+			return fmt.Errorf("can't initialize codec with %s", err.Error())
+		}
+		err = h.audioDecoder.InitRaw(datas)
+
+		if err != nil {
+			log.Println(err, "error initializing stream")
+			return fmt.Errorf("can't initialize codec with %s", hex.EncodeToString(datas))
+		}
+
+		return nil
+	}
+
+	pcm, err := h.audioDecoder.Decode(datas)
+	if err != nil {
+		log.Println("decode error: ", hex.EncodeToString(datas), err)
+		return fmt.Errorf("decode error")
+	}
+
+	blockSize := 960
+	for h.audioBuffer = append(h.audioBuffer, pcm...); len(h.audioBuffer) >= blockSize*4; h.audioBuffer = h.audioBuffer[blockSize*4:] {
+		pcm16 := make([]int16, blockSize*2)
+		pcm16len := len(pcm16)
+		for i := 0; i < pcm16len; i++ {
+			pcm16[i] = int16(binary.LittleEndian.Uint16(h.audioBuffer[i*2:]))
+		}
+		bufferSize := 1024
+		opusData := make([]byte, bufferSize)
+		n, err := h.audioEncoder.Encode(pcm16, opusData)
+		if err != nil {
+			return err
+		}
+		opusOutput := opusData[:n]
+		h.audioRTPChan <- opusOutput
+
+	}
+
 	return nil
 }
 

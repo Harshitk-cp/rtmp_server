@@ -36,7 +36,7 @@ func (s *SFUServer) SendRTMPToWebRTC(rm *room.Room, clientID string) error {
 		case audioBuf := <-s.RTMPHandler.audioRTPChan:
 			err := rm.StreamingTracks.AudioTrack.WriteSample(media.Sample{
 				Data:     audioBuf,
-				Duration: time.Second / 30,
+				Duration: time.Second / 60,
 			})
 			if err != nil {
 				logrus.Errorf("Error sending RTP packet to new video track: %v", err)
