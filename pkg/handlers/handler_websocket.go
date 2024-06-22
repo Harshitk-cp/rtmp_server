@@ -93,7 +93,7 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 			logrus.Errorf("Error generating offer: %v", err)
 		}
 
-		go sfuServer.SendRTMPToWebRTC(rm, clientID)
+		sfuServer.SendRTMPToWebRTC(rm, clientID)
 
 		for {
 			_, msg, err := conn.ReadMessage()

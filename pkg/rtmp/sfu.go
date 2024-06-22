@@ -21,27 +21,29 @@ func NewSFUServer(rm *room.RoomManager, rtmpHandler *RTMPHandler) *SFUServer {
 }
 
 func (s *SFUServer) SendRTMPToWebRTC(rm *room.Room, clientID string) error {
-
-	for {
-		select {
-		case videoBuf := <-s.RTMPHandler.videoRTPChan:
+	go func() {
+		for videoBuf := range s.RTMPHandler.videoRTPChan {
 			err := rm.StreamingTracks.VideoTrack.WriteSample(media.Sample{
 				Data:     videoBuf,
 				Duration: 128 * time.Millisecond,
 			})
 			if err != nil {
-				logrus.Errorf("Error sending RTP packet to new video track: %v", err)
-
+				logrus.Errorf("Error sending RTP packet to video track: %v", err)
 			}
-		case audioBuf := <-s.RTMPHandler.audioRTPChan:
+		}
+	}()
+
+	go func() {
+		for audioBuf := range s.RTMPHandler.audioRTPChan {
 			err := rm.StreamingTracks.AudioTrack.WriteSample(media.Sample{
 				Data:     audioBuf,
 				Duration: time.Second / 60,
 			})
 			if err != nil {
-				logrus.Errorf("Error sending RTP packet to new video track: %v", err)
-
+				logrus.Errorf("Error sending RTP packet to audio track: %v", err)
 			}
 		}
-	}
+	}()
+
+	return nil
 }
