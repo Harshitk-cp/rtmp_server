@@ -9,14 +9,18 @@ import (
 )
 
 type Ingress struct {
+	IngressId   string
+	StreamKey   string
 	config      *config.Config
 	sfuServer   *rtmp.SFUServer
 	room        *room.Room
 	participant *room.Participant
 }
 
-func NewIngress(config *config.Config, sfuServer *rtmp.SFUServer, streamKey string, r *room.Room) *Ingress {
+func NewIngress(config *config.Config, sfuServer *rtmp.SFUServer, streamKey string, r *room.Room, ingressId string) *Ingress {
 	return &Ingress{
+		IngressId: ingressId,
+		StreamKey: streamKey,
 		config:    config,
 		sfuServer: sfuServer,
 		room:      r,

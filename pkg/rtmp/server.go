@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"path"
 	"sync"
 
@@ -23,6 +22,7 @@ import (
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
+	"github.com/Harshitk-cp/rtmp_server/pkg/webhook"
 )
 
 type RTMPServer struct {
@@ -120,15 +120,16 @@ type RTMPHandler struct {
 
 	mu sync.Mutex
 
-	opusFile *os.File
+	webhookManager *webhook.WebhookManager
 }
 
-func NewRTMPHandler() *RTMPHandler {
+func NewRTMPHandler(webhookManager *webhook.WebhookManager) *RTMPHandler {
 	return &RTMPHandler{
 		videoRTPChan:   make(chan []byte, 100),
 		audioRTPChan:   make(chan []byte, 100),
 		pcm16Buffer:    make([]int16, 960*2), // Allocate once and reuse
 		opusDataBuffer: make([]byte, 4000),   // Allocate once and reuse
+		webhookManager: webhookManager,
 	}
 }
 
@@ -166,6 +167,8 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 
 	h.log.Infow("Received a new published stream")
 
+	h.webhookManager.SendWebhook("streamKey", "ingress_started", "IN_sAw3KXXai3Ho")
+
 	return nil
 }
 
@@ -186,12 +189,6 @@ func (h *RTMPHandler) initAudio() error {
 	h.audioEncoder = encoder
 	h.SetOpusCtl()
 	h.audioDecoder = fdkaac.NewAacDecoder()
-
-	opusFile, err := os.Create("output.opus")
-	if err != nil {
-		return err
-	}
-	h.opusFile = opusFile
 
 	return nil
 }
@@ -244,9 +241,6 @@ func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
 			h.mu.Unlock()
 			return err
 		}
-		if _, err := h.opusFile.Write(h.opusDataBuffer[:n]); err != nil {
-			return err
-		}
 		h.audioRTPChan <- h.opusDataBuffer[:n]
 		h.audioBuffer = h.audioBuffer[blockSize*4:]
 	}
@@ -290,10 +284,9 @@ func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
 func (h *RTMPHandler) OnClose() {
 	h.log.Infow("closing ingress RTMP session")
 
+	h.webhookManager.SendWebhook("streamKey", "ingress_ended", "IN_sAw3KXXai3Ho")
+
 	if h.onClose != nil {
 		h.onClose(h.resourceId)
-	}
-	if h.opusFile != nil {
-		h.opusFile.Close()
 	}
 }

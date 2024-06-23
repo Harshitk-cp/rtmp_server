@@ -11,6 +11,7 @@ import (
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
 	"github.com/Harshitk-cp/rtmp_server/pkg/room"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
+	"github.com/Harshitk-cp/rtmp_server/pkg/webhook"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -32,12 +33,14 @@ func main() {
 	port := conf.HttpPort
 
 	rm := room.NewRoomManager()
-	rtmpHandler := rtmp.NewRTMPHandler()
+	wm := webhook.NewWebhookManager()
+	rtmpHandler := rtmp.NewRTMPHandler(wm)
 	sfuServer := rtmp.NewSFUServer(rm, rtmpHandler)
 	rtmpServer := rtmp.NewRTMPServer(sfuServer)
+	ingressManager := ingress.NewIngressManager(conf, sfuServer)
 
-	go startRTMPServer(rtmpServer, sfuServer, conf, rm, rtmpHandler)
-	router := setupRouter(sfuServer, rm)
+	go startRTMPServer(rtmpServer, conf, rtmpHandler)
+	router := setupRouter(sfuServer, rm, ingressManager, wm)
 
 	servErr := startHTTPServer(router, fmt.Sprintf(":%d", port))
 	if servErr != nil {
@@ -45,7 +48,7 @@ func main() {
 	}
 }
 
-func setupRouter(sfuServer *rtmp.SFUServer, rm *room.RoomManager) *chi.Mux {
+func setupRouter(sfuServer *rtmp.SFUServer, rm *room.RoomManager, ingress *ingress.IngressManager, wm *webhook.WebhookManager) *chi.Mux {
 	router := chi.NewRouter()
 	router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*", "ws://*"},
@@ -59,6 +62,11 @@ func setupRouter(sfuServer *rtmp.SFUServer, rm *room.RoomManager) *chi.Mux {
 	v1Router := chi.NewRouter()
 	v1Router.Get("/health", handlers.HandleReadiness)
 	v1Router.Get("/ws", handlers.WebSocketHandler(sfuServer, rm))
+
+	v1Router.Post("/createIngress", handlers.HandleCreateIngress(ingress, rm))
+	v1Router.Delete("/removeIngress", handlers.HandleRemoveIngress(ingress))
+
+	v1Router.Post("/registerWebhook", handlers.HandleRegisterWebhook(wm))
 
 	router.Mount("/v1", v1Router)
 	return router
@@ -74,23 +82,8 @@ func startHTTPServer(router *chi.Mux, port string) error {
 	return srv.ListenAndServe()
 }
 
-func startRTMPServer(rtmpServer *rtmp.RTMPServer, sfuServer *rtmp.SFUServer, conf *config.Config, rm *room.RoomManager, rtmpHandler *rtmp.RTMPHandler) {
+func startRTMPServer(rtmpServer *rtmp.RTMPServer, conf *config.Config, rtmpHandler *rtmp.RTMPHandler) {
 	err := rtmpServer.Start(conf, rtmpHandler, func(streamKey, resourceId string) (*params.Params, error) {
-
-		r, exists := rm.GetRoom(streamKey)
-		if !exists {
-			r = rm.CreateRoom(streamKey)
-		}
-
-		logrus.Infof("Stream key: %v", streamKey)
-
-		ingressManager := ingress.NewIngressManager(conf, sfuServer)
-		ingress, err := ingressManager.CreateIngress(streamKey, r)
-		if err != nil {
-			logrus.Errorf("Failed to create ingress: %v", err)
-			return nil, err
-		}
-		go ingress.Start()
 
 		return nil, nil
 	})

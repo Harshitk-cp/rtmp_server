@@ -13,6 +13,7 @@ import (
 
 type Participant struct {
 	ID   string
+	Name string
 	Conn *websocket.Conn
 
 	mutex sync.RWMutex
@@ -25,14 +26,13 @@ func NewParticipant(id string, conn *websocket.Conn) *Participant {
 	}
 }
 
-func (p *Participant) Send(message SignalMessage) {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+func (r *Room) CreateParticipant(id string, conn *websocket.Conn) (*Participant, error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
 
-	err := p.Conn.WriteJSON(message)
-	if err != nil {
-		logrus.Errorf("Error sending message to participant %v: %v", p.ID, err)
-	}
+	p := NewParticipant(id, conn)
+	r.Participants[id] = p
+	return p, nil
 }
 
 type Room struct {
@@ -79,15 +79,6 @@ func NewStreamingTracks() (*StreamingTracks, error) {
 		VideoTrack: videoTrack,
 		AudioTrack: audioTrack,
 	}, nil
-}
-
-func (r *Room) CreateParticipant(id string, conn *websocket.Conn) (*Participant, error) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
-	p := NewParticipant(id, conn)
-	r.Participants[id] = p
-	return p, nil
 }
 
 func (r *Room) RemoveParticipant(id string) error {
@@ -214,5 +205,15 @@ func (r *Room) Broadcast(senderID, msgType, data, fromClientID string) {
 			participant.Send(message)
 
 		}
+	}
+}
+
+func (p *Participant) Send(message SignalMessage) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	err := p.Conn.WriteJSON(message)
+	if err != nil {
+		logrus.Errorf("Error sending message to participant %v: %v", p.ID, err)
 	}
 }

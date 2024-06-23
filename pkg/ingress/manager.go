@@ -7,6 +7,7 @@ import (
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/room"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
+	protoutils "github.com/livekit/protocol/utils"
 )
 
 type IngressManager struct {
@@ -22,29 +23,29 @@ func NewIngressManager(config *config.Config, sfuServer *rtmp.SFUServer) *Ingres
 	}
 }
 
-func (m *IngressManager) CreateIngress(streamKey string, r *room.Room) (*Ingress, error) {
-	if ingress, ok := m.ingressMap.Load(streamKey); ok {
-		return ingress.(*Ingress), nil
-	}
+func (m *IngressManager) CreateIngress(r *room.Room) (*Ingress, error) {
 
-	ingress := NewIngress(m.config, m.sfuServer, streamKey, r)
+	ingressId := protoutils.NewGuid(protoutils.IngressPrefix)
+	streamKey := protoutils.NewGuid(protoutils.RTMPResourcePrefix)
+
+	ingress := NewIngress(m.config, m.sfuServer, streamKey, r, ingressId)
 	if ingress == nil {
 		return nil, fmt.Errorf("failed to create ingress for stream key: %s", streamKey)
 	}
 
-	m.ingressMap.Store(streamKey, ingress)
+	m.ingressMap.Store(ingressId, ingress)
 
 	return ingress, nil
 }
 
-func (m *IngressManager) RemoveIngress(streamKey string) error {
-	ingress, ok := m.ingressMap.Load(streamKey)
+func (m *IngressManager) RemoveIngress(ingressId string) error {
+	ingress, ok := m.ingressMap.Load(ingressId)
 	if !ok {
 		return nil
 	}
 	ingress.(*Ingress).Stop()
 
-	m.ingressMap.Delete(streamKey)
+	m.ingressMap.Delete(ingressId)
 
 	return nil
 }
