@@ -26,6 +26,7 @@ func (rm *RoomManager) CreateRoom(id string) *Room {
 
 	room := NewRoom(id, streamKey, ingressId)
 	rm.rooms[id] = room
+
 	return room
 }
 

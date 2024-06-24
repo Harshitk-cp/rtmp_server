@@ -63,7 +63,6 @@ func setupRouter(sfuServer *rtmp.SFUServer, rm *room.RoomManager, wm *webhook.We
 	v1Router.Get("/ws", handlers.WebSocketHandler(sfuServer, rm))
 
 	v1Router.Post("/createIngress", handlers.HandleCreateIngress(rm))
-	v1Router.Delete("/removeIngress", handlers.HandleRemoveIngress(rm))
 
 	v1Router.Post("/registerWebhook", handlers.HandleRegisterWebhook(wm))
 

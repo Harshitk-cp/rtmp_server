@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
 	"github.com/gorilla/websocket"
@@ -26,6 +27,13 @@ func NewParticipant(id string, conn *websocket.Conn) *Participant {
 	}
 }
 
+func (r *Room) AddChatMessage(senderID, content string) {
+	r.chatMutex.Lock()
+	defer r.chatMutex.Unlock()
+
+	r.ChatMessages = append(r.ChatMessages, content)
+}
+
 func (r *Room) CreateParticipant(id string, conn *websocket.Conn) (*Participant, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -44,6 +52,9 @@ type Room struct {
 	StreamingTracks       *StreamingTracks
 	mutex                 sync.RWMutex
 	IsPublishing          bool
+
+	ChatMessages []string
+	chatMutex    sync.RWMutex
 }
 
 func NewRoom(id, streamKey, ingressId string) *Room {
@@ -104,9 +115,10 @@ func (r *Room) RemoveParticipant(id string) error {
 }
 
 type SignalMessage struct {
-	Type         string `json:"type"`
-	Data         string `json:"data"`
-	FromClientID string `json:"fromClientID"`
+	Type         string    `json:"type"`
+	Data         string    `json:"data"`
+	FromClientID string    `json:"fromClientID"`
+	Timestamp    time.Time `json:"timestamp"`
 }
 
 func (r *Room) SendToParticipant(participantID, msgType, data, fromID string) {
@@ -204,13 +216,35 @@ func (r *Room) Broadcast(senderID, msgType, data, fromClientID string) {
 	defer r.mutex.RUnlock()
 
 	for id, participant := range r.Participants {
-		if id != senderID {
+		if id != senderID && msgType == "getCandidate" {
 			message := SignalMessage{
 				Type:         msgType,
 				Data:         data,
 				FromClientID: fromClientID,
 			}
 			participant.Send(message)
+
+		} else {
+
+			if msgType == "getChat" {
+				r.AddChatMessage(fromClientID, data)
+
+				message := SignalMessage{
+					Type:         msgType,
+					Data:         data,
+					FromClientID: fromClientID,
+					Timestamp:    time.Now(),
+				}
+
+				participant.Send(message)
+			} else {
+				message := SignalMessage{
+					Type:         msgType,
+					Data:         data,
+					FromClientID: fromClientID,
+				}
+				participant.Send(message)
+			}
 
 		}
 	}
