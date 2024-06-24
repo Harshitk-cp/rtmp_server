@@ -10,42 +10,35 @@ import (
 )
 
 type WebhookManager struct {
-	webhooks map[string]string
-	mu       sync.RWMutex
+	webhookURL string
+	mu         sync.RWMutex
 }
 
 func NewWebhookManager() *WebhookManager {
-	return &WebhookManager{
-		webhooks: make(map[string]string),
-	}
+	return &WebhookManager{}
 }
 
-func (wm *WebhookManager) RegisterWebhook(streamKey, webhookURL string) {
+func (wm *WebhookManager) RegisterWebhook(webhookURL string) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
-	wm.webhooks[streamKey] = webhookURL
-	logrus.Info("Webhook registered successfully for stream key: ", streamKey)
+	wm.webhookURL = webhookURL
+	logrus.Info("Webhook registered successfully: ", webhookURL)
 }
 
-func (wm *WebhookManager) UnregisterWebhook(streamKey string) {
-	wm.mu.Lock()
-	defer wm.mu.Unlock()
-	delete(wm.webhooks, streamKey)
-}
-
-func (wm *WebhookManager) SendWebhook(offlineStreamKey, event, ingressId string) {
+func (wm *WebhookManager) SendWebhook(event, ingressId string) {
 	wm.mu.RLock()
-	webhooks := make(map[string]string, len(wm.webhooks))
-	for k, v := range wm.webhooks {
-		webhooks[k] = v
-	}
+	webhookURL := wm.webhookURL
 	wm.mu.RUnlock()
+
+	if webhookURL == "" {
+		logrus.Warn("No webhook URL registered")
+		return
+	}
 
 	payload := map[string]interface{}{
 		"event": map[string]string{
-			"offlineStreamKey": offlineStreamKey,
-			"event":            event,
-			"ingressId":        ingressId,
+			"event":     event,
+			"ingressId": ingressId,
 		},
 	}
 	jsonPayload, err := json.Marshal(payload)
@@ -54,26 +47,24 @@ func (wm *WebhookManager) SendWebhook(offlineStreamKey, event, ingressId string)
 		return
 	}
 
-	for streamKey, webhookURL := range webhooks {
-		go func(streamKey, webhookURL string) {
-			logrus.Infof("Sending webhook to %s for stream key %s", webhookURL, streamKey)
+	go func() {
+		logrus.Infof("Sending webhook to %s", webhookURL)
 
-			retries := 3
-			for i := 0; i < retries; i++ {
-				resp, err := http.Post(webhookURL, "application/json", bytes.NewBuffer(jsonPayload))
-				if err != nil {
-					logrus.Errorf("Failed to send webhook (attempt %d): %v", i+1, err)
-					continue
-				}
-				defer resp.Body.Close()
-
-				if resp.StatusCode == http.StatusOK {
-					logrus.Infof("Webhook sent successfully to %s", webhookURL)
-					return
-				}
-				logrus.Errorf("Webhook request failed with status code: %d (attempt %d)", resp.StatusCode, i+1)
+		retries := 3
+		for i := 0; i < retries; i++ {
+			resp, err := http.Post(webhookURL, "application/json", bytes.NewBuffer(jsonPayload))
+			if err != nil {
+				logrus.Errorf("Failed to send webhook (attempt %d): %v", i+1, err)
+				continue
 			}
-			logrus.Errorf("Failed to send webhook after %d attempts", retries)
-		}(streamKey, webhookURL)
-	}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				logrus.Infof("Webhook sent successfully to %s, for event %s", webhookURL, event)
+				return
+			}
+			logrus.Errorf("Webhook request failed with status code: %d (attempt %d)", resp.StatusCode, i+1)
+		}
+		logrus.Errorf("Failed to send webhook after %d attempts", retries)
+	}()
 }

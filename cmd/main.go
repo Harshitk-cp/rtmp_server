@@ -7,7 +7,7 @@ import (
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/handlers"
-	"github.com/Harshitk-cp/rtmp_server/pkg/ingress"
+
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
 	"github.com/Harshitk-cp/rtmp_server/pkg/room"
 	"github.com/Harshitk-cp/rtmp_server/pkg/rtmp"
@@ -34,13 +34,12 @@ func main() {
 
 	rm := room.NewRoomManager()
 	wm := webhook.NewWebhookManager()
-	rtmpHandler := rtmp.NewRTMPHandler(wm)
+	rtmpHandler := rtmp.NewRTMPHandler(wm, rm)
 	sfuServer := rtmp.NewSFUServer(rm, rtmpHandler)
 	rtmpServer := rtmp.NewRTMPServer(sfuServer)
-	ingressManager := ingress.NewIngressManager(conf, sfuServer)
 
 	go startRTMPServer(rtmpServer, conf, rtmpHandler)
-	router := setupRouter(sfuServer, rm, ingressManager, wm)
+	router := setupRouter(sfuServer, rm, wm)
 
 	servErr := startHTTPServer(router, fmt.Sprintf(":%d", port))
 	if servErr != nil {
@@ -48,7 +47,7 @@ func main() {
 	}
 }
 
-func setupRouter(sfuServer *rtmp.SFUServer, rm *room.RoomManager, ingress *ingress.IngressManager, wm *webhook.WebhookManager) *chi.Mux {
+func setupRouter(sfuServer *rtmp.SFUServer, rm *room.RoomManager, wm *webhook.WebhookManager) *chi.Mux {
 	router := chi.NewRouter()
 	router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*", "ws://*"},
@@ -63,8 +62,8 @@ func setupRouter(sfuServer *rtmp.SFUServer, rm *room.RoomManager, ingress *ingre
 	v1Router.Get("/health", handlers.HandleReadiness)
 	v1Router.Get("/ws", handlers.WebSocketHandler(sfuServer, rm))
 
-	v1Router.Post("/createIngress", handlers.HandleCreateIngress(ingress, rm))
-	v1Router.Delete("/removeIngress", handlers.HandleRemoveIngress(ingress))
+	v1Router.Post("/createIngress", handlers.HandleCreateIngress(rm))
+	v1Router.Delete("/removeIngress", handlers.HandleRemoveIngress(rm))
 
 	v1Router.Post("/registerWebhook", handlers.HandleRegisterWebhook(wm))
 

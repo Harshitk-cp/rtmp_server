@@ -37,23 +37,31 @@ func (r *Room) CreateParticipant(id string, conn *websocket.Conn) (*Participant,
 
 type Room struct {
 	ID                    string
+	IngressID             string
+	StreamKey             string
 	Participants          map[string]*Participant
 	ClientPeerConnections map[string]*webrtc.PeerConnection
 	StreamingTracks       *StreamingTracks
 	mutex                 sync.RWMutex
+	IsPublishing          bool
 }
 
-func NewRoom(id string) *Room {
+func NewRoom(id, streamKey, ingressId string) *Room {
 	streamingTracks, err := NewStreamingTracks()
 	if err != nil {
 		logrus.Fatalf("Error creating streaming tracks: %v", err)
 	}
 
+	logrus.Infof("Room created with ID: %v", id)
+
 	return &Room{
 		ID:                    id,
+		IngressID:             ingressId,
+		StreamKey:             streamKey,
 		Participants:          make(map[string]*Participant),
 		ClientPeerConnections: make(map[string]*webrtc.PeerConnection),
 		StreamingTracks:       streamingTracks,
+		IsPublishing:          false,
 	}
 }
 

@@ -10,7 +10,6 @@ import (
 func HandleRegisterWebhook(wm *webhook.WebhookManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			StreamKey  string `json:"streamKey"`
 			WebhookURL string `json:"webhookURL"`
 		}
 
@@ -19,7 +18,12 @@ func HandleRegisterWebhook(wm *webhook.WebhookManager) http.HandlerFunc {
 			return
 		}
 
-		wm.RegisterWebhook(req.StreamKey, req.WebhookURL)
+		if req.WebhookURL == "" {
+			http.Error(w, "WebhookURL is required", http.StatusBadRequest)
+			return
+		}
+
+		wm.RegisterWebhook(req.WebhookURL)
 		w.WriteHeader(http.StatusOK)
 	}
 }

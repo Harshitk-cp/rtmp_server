@@ -1,6 +1,10 @@
 package room
 
-import "sync"
+import (
+	"sync"
+
+	protoutils "github.com/livekit/protocol/utils"
+)
 
 type RoomManager struct {
 	rooms map[string]*Room
@@ -17,7 +21,10 @@ func (rm *RoomManager) CreateRoom(id string) *Room {
 	rm.mutex.Lock()
 	defer rm.mutex.Unlock()
 
-	room := NewRoom(id)
+	ingressId := protoutils.NewGuid(protoutils.IngressPrefix)
+	streamKey := protoutils.NewGuid(protoutils.RTMPResourcePrefix)
+
+	room := NewRoom(id, streamKey, ingressId)
 	rm.rooms[id] = room
 	return room
 }
@@ -35,17 +42,4 @@ func (rm *RoomManager) RemoveRoom(id string) {
 	defer rm.mutex.Unlock()
 
 	delete(rm.rooms, id)
-}
-
-func (rm *RoomManager) JoinRoom(roomID string) (*Room, error) {
-	rm.mutex.Lock()
-	defer rm.mutex.Unlock()
-
-	room, exists := rm.rooms[roomID]
-	if !exists {
-		room = NewRoom(roomID)
-		rm.rooms[roomID] = room
-	}
-
-	return room, nil
 }

@@ -21,6 +21,8 @@ import (
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
+	"github.com/Harshitk-cp/rtmp_server/pkg/room"
+
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
 	"github.com/Harshitk-cp/rtmp_server/pkg/webhook"
 )
@@ -121,15 +123,17 @@ type RTMPHandler struct {
 	mu sync.Mutex
 
 	webhookManager *webhook.WebhookManager
+	roomManager    *room.RoomManager
 }
 
-func NewRTMPHandler(webhookManager *webhook.WebhookManager) *RTMPHandler {
+func NewRTMPHandler(webhookManager *webhook.WebhookManager, roomManager *room.RoomManager) *RTMPHandler {
 	return &RTMPHandler{
 		videoRTPChan:   make(chan []byte, 100),
 		audioRTPChan:   make(chan []byte, 100),
 		pcm16Buffer:    make([]int16, 960*2), // Allocate once and reuse
 		opusDataBuffer: make([]byte, 4000),   // Allocate once and reuse
 		webhookManager: webhookManager,
+		roomManager:    roomManager,
 	}
 }
 
@@ -166,8 +170,6 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 	}).Info("Received publish request")
 
 	h.log.Infow("Received a new published stream")
-
-	h.webhookManager.SendWebhook("streamKey", "ingress_started", "IN_sAw3KXXai3Ho")
 
 	return nil
 }
@@ -284,7 +286,7 @@ func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
 func (h *RTMPHandler) OnClose() {
 	h.log.Infow("closing ingress RTMP session")
 
-	h.webhookManager.SendWebhook("streamKey", "ingress_ended", "IN_sAw3KXXai3Ho")
+	// h.webhookManager.SendWebhook("streamKey", "ingress_ended", "IN_sAw3KXXai3Ho")
 
 	if h.onClose != nil {
 		h.onClose(h.resourceId)

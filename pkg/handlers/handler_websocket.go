@@ -44,7 +44,8 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 
 		rm, exist := roomManager.GetRoom(roomID)
 		if !exist {
-			rm = roomManager.CreateRoom(roomID)
+			logrus.Errorf("Room not found with ID: %v", roomID)
+			return
 		}
 
 		pc, err := webrtc.NewPeerConnection(webrtc.Configuration{
@@ -93,7 +94,7 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 			logrus.Errorf("Error generating offer: %v", err)
 		}
 
-		sfuServer.SendRTMPToWebRTC(rm, clientID)
+		go sfuServer.SendRTMPToWebRTC(rm)
 
 		for {
 			_, msg, err := conn.ReadMessage()
