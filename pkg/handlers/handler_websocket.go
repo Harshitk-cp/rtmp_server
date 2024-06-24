@@ -36,15 +36,17 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 
 		clientID := r.URL.Query().Get("clientID")
 		roomID := r.URL.Query().Get("roomID")
+		clientName := r.URL.Query().Get("clientName")
 
-		if clientID == "" || roomID == "" {
+		if clientID == "" || roomID == "" || clientName == "" {
 			http.Error(w, "Missing required parameters", http.StatusBadRequest)
 			return
 		}
 
 		rm, exist := roomManager.GetRoom(roomID)
 		if !exist {
-			rm = roomManager.CreateRoom(roomID)
+			logrus.Errorf("Room not found with ID: %v", roomID)
+			return
 		}
 
 		pc, err := webrtc.NewPeerConnection(webrtc.Configuration{
@@ -93,7 +95,7 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 			logrus.Errorf("Error generating offer: %v", err)
 		}
 
-		go sfuServer.SendRTMPToWebRTC(rm, clientID)
+		go sfuServer.SendRTMPToWebRTC(rm)
 
 		for {
 			_, msg, err := conn.ReadMessage()
@@ -115,6 +117,8 @@ func WebSocketHandler(sfuServer *rtmp.SFUServer, roomManager *room.RoomManager) 
 				handleClientAnswer(rm, signal.Data, clientID)
 			case "candidate":
 				handleCandidate(rm, signal.Data, clientID)
+			case "chat":
+				handleChatMessage(rm, signal.Data, clientName)
 			default:
 				logrus.Warnf("Unknown message type: %v", signal.Type)
 			}
@@ -139,4 +143,8 @@ func handleCandidate(rm *room.Room, candidate, clientID string) {
 		logrus.Errorf("Error adding ICE candidate: %v", err)
 	}
 
+}
+
+func handleChatMessage(rm *room.Room, content string, clientName string) {
+	rm.Broadcast(clientName, "getChat", content, clientName)
 }

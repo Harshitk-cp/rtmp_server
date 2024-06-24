@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
 	"github.com/gorilla/websocket"
@@ -13,6 +14,7 @@ import (
 
 type Participant struct {
 	ID   string
+	Name string
 	Conn *websocket.Conn
 
 	mutex sync.RWMutex
@@ -25,35 +27,52 @@ func NewParticipant(id string, conn *websocket.Conn) *Participant {
 	}
 }
 
-func (p *Participant) Send(message SignalMessage) {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+func (r *Room) AddChatMessage(senderID, content string) {
+	r.chatMutex.Lock()
+	defer r.chatMutex.Unlock()
 
-	err := p.Conn.WriteJSON(message)
-	if err != nil {
-		logrus.Errorf("Error sending message to participant %v: %v", p.ID, err)
-	}
+	r.ChatMessages = append(r.ChatMessages, content)
+}
+
+func (r *Room) CreateParticipant(id string, conn *websocket.Conn) (*Participant, error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	p := NewParticipant(id, conn)
+	r.Participants[id] = p
+	return p, nil
 }
 
 type Room struct {
 	ID                    string
+	IngressID             string
+	StreamKey             string
 	Participants          map[string]*Participant
 	ClientPeerConnections map[string]*webrtc.PeerConnection
 	StreamingTracks       *StreamingTracks
 	mutex                 sync.RWMutex
+	IsPublishing          bool
+
+	ChatMessages []string
+	chatMutex    sync.RWMutex
 }
 
-func NewRoom(id string) *Room {
+func NewRoom(id, streamKey, ingressId string) *Room {
 	streamingTracks, err := NewStreamingTracks()
 	if err != nil {
 		logrus.Fatalf("Error creating streaming tracks: %v", err)
 	}
 
+	logrus.Infof("Room created with ID: %v", id)
+
 	return &Room{
 		ID:                    id,
+		IngressID:             ingressId,
+		StreamKey:             streamKey,
 		Participants:          make(map[string]*Participant),
 		ClientPeerConnections: make(map[string]*webrtc.PeerConnection),
 		StreamingTracks:       streamingTracks,
+		IsPublishing:          false,
 	}
 }
 
@@ -81,15 +100,6 @@ func NewStreamingTracks() (*StreamingTracks, error) {
 	}, nil
 }
 
-func (r *Room) CreateParticipant(id string, conn *websocket.Conn) (*Participant, error) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
-	p := NewParticipant(id, conn)
-	r.Participants[id] = p
-	return p, nil
-}
-
 func (r *Room) RemoveParticipant(id string) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -105,9 +115,10 @@ func (r *Room) RemoveParticipant(id string) error {
 }
 
 type SignalMessage struct {
-	Type         string `json:"type"`
-	Data         string `json:"data"`
-	FromClientID string `json:"fromClientID"`
+	Type         string    `json:"type"`
+	Data         string    `json:"data"`
+	FromClientID string    `json:"fromClientID"`
+	Timestamp    time.Time `json:"timestamp"`
 }
 
 func (r *Room) SendToParticipant(participantID, msgType, data, fromID string) {
@@ -205,7 +216,7 @@ func (r *Room) Broadcast(senderID, msgType, data, fromClientID string) {
 	defer r.mutex.RUnlock()
 
 	for id, participant := range r.Participants {
-		if id != senderID {
+		if id != senderID && msgType == "getCandidate" {
 			message := SignalMessage{
 				Type:         msgType,
 				Data:         data,
@@ -213,6 +224,38 @@ func (r *Room) Broadcast(senderID, msgType, data, fromClientID string) {
 			}
 			participant.Send(message)
 
+		} else {
+
+			if msgType == "getChat" {
+				r.AddChatMessage(fromClientID, data)
+
+				message := SignalMessage{
+					Type:         msgType,
+					Data:         data,
+					FromClientID: fromClientID,
+					Timestamp:    time.Now(),
+				}
+
+				participant.Send(message)
+			} else {
+				message := SignalMessage{
+					Type:         msgType,
+					Data:         data,
+					FromClientID: fromClientID,
+				}
+				participant.Send(message)
+			}
+
 		}
+	}
+}
+
+func (p *Participant) Send(message SignalMessage) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	err := p.Conn.WriteJSON(message)
+	if err != nil {
+		logrus.Errorf("Error sending message to participant %v: %v", p.ID, err)
 	}
 }

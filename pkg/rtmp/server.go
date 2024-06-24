@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"path"
+	"sync"
 
 	"github.com/Glimesh/go-fdkaac/fdkaac"
 	"github.com/livekit/protocol/logger"
@@ -20,13 +21,17 @@ import (
 
 	"github.com/Harshitk-cp/rtmp_server/pkg/config"
 	"github.com/Harshitk-cp/rtmp_server/pkg/errors"
+	"github.com/Harshitk-cp/rtmp_server/pkg/room"
+
 	"github.com/Harshitk-cp/rtmp_server/pkg/params"
+	"github.com/Harshitk-cp/rtmp_server/pkg/webhook"
 )
 
 type RTMPServer struct {
 	server   *rtmp.Server
 	sfu      *SFUServer
 	handlers map[string]*RTMPHandler
+	mu       sync.Mutex
 }
 
 func NewRTMPServer(sfu *SFUServer) *RTMPServer {
@@ -53,8 +58,9 @@ func (s *RTMPServer) Start(conf *config.Config, h *RTMPHandler, onPublish func(s
 	srv := rtmp.NewServer(&rtmp.ServerConfig{
 		OnConnect: func(conn net.Conn) (io.ReadWriteCloser, *rtmp.ConnConfig) {
 			l := log.StandardLogger()
-
+			s.mu.Lock()
 			s.handlers[h.resourceId] = h
+			s.mu.Unlock()
 
 			return conn, &rtmp.ConnConfig{
 				Handler: h,
@@ -80,6 +86,8 @@ func (h *RTMPHandler) OnConnect(timestamp uint32, cmd *rtmpmsg.NetConnectionConn
 }
 
 func (s *RTMPServer) CloseHandler(resourceId string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	h, ok := s.handlers[resourceId]
 	if ok && h != nil {
 		delete(s.handlers, resourceId)
@@ -107,12 +115,25 @@ type RTMPHandler struct {
 	audioEncoder   *opus.Encoder
 	audioBuffer    []byte
 	audioClockRate uint32
+
+	videoBuffer    []byte
+	pcm16Buffer    []int16
+	opusDataBuffer []byte
+
+	mu sync.Mutex
+
+	webhookManager *webhook.WebhookManager
+	roomManager    *room.RoomManager
 }
 
-func NewRTMPHandler() *RTMPHandler {
+func NewRTMPHandler(webhookManager *webhook.WebhookManager, roomManager *room.RoomManager) *RTMPHandler {
 	return &RTMPHandler{
-		videoRTPChan: make(chan []byte, 100),
-		audioRTPChan: make(chan []byte, 100),
+		videoRTPChan:   make(chan []byte, 100),
+		audioRTPChan:   make(chan []byte, 100),
+		pcm16Buffer:    make([]int16, 960*2), // Allocate once and reuse
+		opusDataBuffer: make([]byte, 4000),   // Allocate once and reuse
+		webhookManager: webhookManager,
+		roomManager:    roomManager,
 	}
 }
 
@@ -154,14 +175,14 @@ func (h *RTMPHandler) OnPublish(_ *rtmp.StreamContext, timestamp uint32, cmd *rt
 }
 
 func (h *RTMPHandler) SetOpusCtl() {
-	h.audioEncoder.SetMaxBandwidth(opus.Bandwidth(2))
+	h.audioEncoder.SetMaxBandwidth(opus.Bandwidth(opus.Fullband))
 	h.audioEncoder.SetComplexity(9)
-	h.audioEncoder.SetBitrateToAuto()
+	h.audioEncoder.SetBitrateToMax()
+	// h.audioEncoder.SetBitrate(5000)
 	h.audioEncoder.SetInBandFEC(true)
 }
 
 func (h *RTMPHandler) initAudio() error {
-
 	encoder, err := opus.NewEncoder(48000, 2, opus.AppAudio)
 	if err != nil {
 		println(err.Error())
@@ -175,7 +196,6 @@ func (h *RTMPHandler) initAudio() error {
 }
 
 func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
-
 	var audio flvtag.AudioData
 	if err := flvtag.DecodeAudioData(payload, &audio); err != nil {
 		return err
@@ -186,25 +206,21 @@ func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
 		return err
 	}
 	if data.Len() <= 0 {
-		log.Println("no audio datas", timestamp, payload)
-		return fmt.Errorf("no audio datas")
+		log.Println("no audio data", timestamp, payload)
+		return fmt.Errorf("no audio data")
 	}
 	datas := data.Bytes()
 
 	if audio.AACPacketType == flvtag.AACPacketTypeSequenceHeader {
 		log.Println("Created new codec ", hex.EncodeToString(datas))
-		err := h.initAudio()
-		if err != nil {
-			log.Println(err, "error initializing Audio")
-			return fmt.Errorf("can't initialize codec with %s", err.Error())
+		if err := h.initAudio(); err != nil {
+			log.Println("error initializing Audio", err)
+			return fmt.Errorf("can't initialize codec: %s", err.Error())
 		}
-		err = h.audioDecoder.InitRaw(datas)
-
-		if err != nil {
-			log.Println(err, "error initializing stream")
+		if err := h.audioDecoder.InitRaw(datas); err != nil {
+			log.Println("error initializing stream", err)
 			return fmt.Errorf("can't initialize codec with %s", hex.EncodeToString(datas))
 		}
-
 		return nil
 	}
 
@@ -215,23 +231,23 @@ func (h *RTMPHandler) OnAudio(timestamp uint32, payload io.Reader) error {
 	}
 
 	blockSize := 960
-	for h.audioBuffer = append(h.audioBuffer, pcm...); len(h.audioBuffer) >= blockSize*4; h.audioBuffer = h.audioBuffer[blockSize*4:] {
-		pcm16 := make([]int16, blockSize*2)
-		pcm16len := len(pcm16)
-		for i := 0; i < pcm16len; i++ {
-			pcm16[i] = int16(binary.LittleEndian.Uint16(h.audioBuffer[i*2:]))
+	h.mu.Lock()
+	h.audioBuffer = append(h.audioBuffer, pcm...)
+	for len(h.audioBuffer) >= blockSize*4 {
+		for i := 0; i < blockSize*2; i++ {
+			h.pcm16Buffer[i] = int16(binary.LittleEndian.Uint16(h.audioBuffer[i*2:]))
 		}
-		bufferSize := 1024
-		opusData := make([]byte, bufferSize)
-		n, err := h.audioEncoder.Encode(pcm16, opusData)
+
+		n, err := h.audioEncoder.Encode(h.pcm16Buffer, h.opusDataBuffer)
 		if err != nil {
+			h.mu.Unlock()
 			return err
 		}
-		opusOutput := opusData[:n]
-		h.audioRTPChan <- opusOutput
-
+		h.audioRTPChan <- h.opusDataBuffer[:n]
+		h.audioBuffer = h.audioBuffer[blockSize*4:]
 	}
 
+	h.mu.Unlock()
 	return nil
 }
 
@@ -248,27 +264,29 @@ func (h *RTMPHandler) OnVideo(timestamp uint32, payload io.Reader) error {
 		return err
 	}
 
-	outBuf := []byte{}
 	videoBuffer := data.Bytes()
+	outBuf := h.videoBuffer[:0]
 	for offset := 0; offset < len(videoBuffer); {
-		bufferLength := int(binary.BigEndian.Uint32(videoBuffer[offset : offset+headerLengthField]))
-		if offset+bufferLength >= len(videoBuffer) {
+		if offset+headerLengthField >= len(videoBuffer) {
 			break
 		}
-
+		bufferLength := int(binary.BigEndian.Uint32(videoBuffer[offset : offset+headerLengthField]))
 		offset += headerLengthField
+		if offset+bufferLength > len(videoBuffer) {
+			break
+		}
 		outBuf = append(outBuf, []byte{0x00, 0x00, 0x00, 0x01}...)
 		outBuf = append(outBuf, videoBuffer[offset:offset+bufferLength]...)
-
-		offset += int(bufferLength)
+		offset += bufferLength
 	}
-
 	h.videoRTPChan <- outBuf
 	return nil
 }
 
 func (h *RTMPHandler) OnClose() {
 	h.log.Infow("closing ingress RTMP session")
+
+	// h.webhookManager.SendWebhook("streamKey", "ingress_ended", "IN_sAw3KXXai3Ho")
 
 	if h.onClose != nil {
 		h.onClose(h.resourceId)
